@@ -12,57 +12,49 @@
 ;;
 ;; Copyright (c) 2013-2016, Kenneth Leung. All rights reserved.
 
-
 (ns ^{:doc ""
       :author "kenl"}
 
   czlab.frigga.core.negamax
 
-  (:require
-    [czlab.xlib.util.core :refer [MubleObj! ]]
-    [czlab.xlib.util.logging :as log]
-    [czlab.xlib.util.str :refer [strim hgl?]])
+  (:require [czlab.basal.logging :as log]
+            [clojure.string :as cs])
 
-  (:import
-    [com.zotohlab.odin.game Game PlayRoom
-    Board Player PlayerSession]
-    [com.zotohlab.skaro.core Muble]
-    [com.zotohlab.odin.core Session]))
+  (:use [czlab.basal.core]
+        [czlab.basal.str])
+
+  (:import [czlab.loki.game Board]
+           [czlab.loki.core Player Session]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;(set! *warn-on-reflection* true)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(def ^:private PINF 1000000)
+(def ^:private _pinf_ 1000000)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defprotocol NegaAlgoAPI "" (Evaluate [_]))
+(defprotocol NegaAlgoAPI "" (evaluate [_]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defprotocol NegaSnapshotAPI
-
   ""
-
-  (SetLastBestMove [_ m] )
-  (SetOther [_ o] )
-  (SetCur [_ c] )
-  (SetState [_ s] )
-  (LastBestMove [_] )
-  (Other [_] )
-  (Cur [_] )
-  (State [_] ))
+  (setLastBestMove [_ m] )
+  (setOther [_ o] )
+  (setCur [_ c] )
+  (setState [_ s] )
+  (lastBestMove [_] )
+  (other [_] )
+  (cur [_] )
+  (state [_] ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn NegaMax
-
+(defn- negaMaxAlgo
   "The Nega-Max algo implementation"
-
-  [^Board board game
-   maxDepth depth alpha beta]
+  [^Board board game maxDepth depth alpha beta]
 
   (if (or (== depth 0)
           (.isOver board game))
@@ -70,13 +62,13 @@
     ;;:else
     (with-local-vars
       [openMoves (.getNextMoves board game)
-       bestValue (- PINF)
+       bestValue (- _pinf_)
        localAlpha alpha
        halt false
        rc 0
        bestMove (nth openMoves 0) ]
       (when (== depth maxDepth)
-        (SetLastBestMove game (nth @openMoves 0))) ;; this will change overtime, most likely
+        (setLastBestMove game (nth @openMoves 0))) ;; this will change overtime, most likely
       (loop [n 0]
         (when-not (or (> n (count @openMoves))
                       (true? @halt))
@@ -84,11 +76,11 @@
             (doto board
               (.makeMove game move)
               (.switchPlayer game))
-            (var-set rc (- (NegaMax board
-                                    game
-                                    maxDepth
-                                    (dec depth)
-                                    (- beta) (- @localAlpha))))
+            (var-set rc (- (negaMaxAlgo board
+                                        game
+                                        maxDepth
+                                        (dec depth)
+                                        (- beta) (- @localAlpha))))
             (doto board
               (.switchPlayer game)
               (.unmakeMove game move))
@@ -97,7 +89,7 @@
               (var-set localAlpha @rc)
               (var-set bestMove move)
               (when (== depth maxDepth)
-                (SetLastBestMove game move))
+                (setLastBestMove game move))
               (when (>= @localAlpha beta)
                 (var-set halt true)))
             (recur (inc n) ))))
@@ -105,38 +97,32 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn ReifyNegaMaxAlgo
-
-  "Create an implementation of nega-max"
-
-  [^Board board]
+(defn negamax<>
+  "Implementation of nega-max" [^Board board]
 
   (reify
     NegaAlgoAPI
-    (Evaluate [_]
+    (evaluate [_]
       (let [snapshot (.takeSnapshot board) ]
-        (NegaMax board snapshot 10 10 (- PINF) PINF)
-        (LastBestMove snapshot)))))
+        (negaMaxAlgo board snapshot 10 10 (- _pinf_) _pinf_)
+        (lastBestMove snapshot)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn ReifySnapshot
+(defn snapshot<>
+  "Create a snapshot" []
 
-  "Create a snapshot"
-
-  []
-
-  (let [impl (MubleObj!)]
+  (let [impl (muble<>)]
     (reify
       NegaSnapshotAPI
-      (SetLastBestMove [_ m] (.setv impl :lastbestmove m))
-      (SetOther [_ o] (.setv impl :other o))
-      (SetCur [_ c] (.setv impl :cur c))
-      (SetState [_ s] (.setv impl :state s))
-      (LastBestMove [_] (.getv impl :lastbestmove))
-      (Other [_] (.getv impl :other))
-      (Cur [_] (.getv impl :cur))
-      (State [_] (.getv impl :state)))))
+      (setLastBestMove [_ m] (.setv impl :lastbestmove m))
+      (setOther [_ o] (.setv impl :other o))
+      (setCur [_ c] (.setv impl :cur c))
+      (setState [_ s] (.setv impl :state s))
+      (lastBestMove [_] (.getv impl :lastbestmove))
+      (other [_] (.getv impl :other))
+      (cur [_] (.getv impl :cur))
+      (state [_] (.getv impl :state)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;EOF
