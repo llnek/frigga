@@ -1,37 +1,40 @@
-## Welcome to GitHub Pages
+# frigga
+Server side game platform.
 
-You can use the [editor on GitHub](https://github.com/llnek/frigga/edit/master/README.md) to maintain and preview the content for your website in Markdown files.
+[![Build Status](https://travis-ci.org/llnek/frigga.svg?branch=master)](https://travis-ci.org/llnek/frigga)
 
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
 
-### Markdown
+## Installation
 
-Markdown is a lightweight and easy-to-use syntax for styling your writing. It includes conventions for
+Add the following dependency to your `project.clj` file:
 
-```markdown
-Syntax highlighted code block
+    [io.czlab/frigga "1.0.0"]
 
-# Header 1
-## Header 2
-### Header 3
+## Documentation
 
-- Bulleted
-- List
+* [API Docs](https://llnek.github.io/frigga/)
 
-1. Numbered
-2. List
+## Usage
 
-**Bold** and _Italic_ and `Code` text
 
-[Link](url) and ![Image](src)
-```
 
-For more details see [GitHub Flavored Markdown](https://guides.github.com/features/mastering-markdown/).
+## Contacting me / contributions
 
-### Jekyll Themes
+Please use the project's [GitHub issues page] for all questions, ideas, etc. **Pull requests welcome**. See the project's [GitHub contributors page] for a list of contributors.
 
-Your Pages site will use the layout and styles from the Jekyll theme you have selected in your [repository settings](https://github.com/llnek/frigga/settings). The name of this theme is saved in the Jekyll `_config.yml` configuration file.
+## License
 
-### Support or Contact
+Copyright © 2013-2017 Kenneth Leung
 
-Having trouble with Pages? Check out our [documentation](https://help.github.com/categories/github-pages-basics/) or [contact support](https://github.com/contact) and we’ll help you sort it out.
+Distributed under the Eclipse Public License either version 1.0 or (at
+your option) any later version.
+
+<!--- links (repos) -->
+[CHANGELOG]: https://github.com/llnek/frigga/releases
+[GitHub issues page]: https://github.com/llnek/frigga/issues
+[GitHub contributors page]: https://github.com/llnek/frigga/graphs/contributors
+
+
+
+
+
