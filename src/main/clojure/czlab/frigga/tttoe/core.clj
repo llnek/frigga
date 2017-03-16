@@ -20,7 +20,8 @@
   (:require [czlab.basal.logging :as log]
             [clojure.string :as cs])
 
-  (:use [czlab.basal.format]
+  (:use [czlab.loki.net.core]
+        [czlab.basal.format]
         [czlab.basal.core]
         [czlab.basal.str])
 
@@ -102,47 +103,44 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn TicTacToe
-  "" ^GameImpl [room players options]
+(defn tictactoe
+  "" ^GameImpl [^GameRoom room sessions]
 
-  (let [bsize (or (:size options) 3)
-        grid (long-array (* bsize bsize) _cvz_)
-        goalspace (mapGoalSpace bsize)
+  (let [grid (long-array (* 3 3) _cvz_)
+        goalspace (mapGoalSpace 3)
         actors (object-array 3)
         numcells (alength grid)
-        impl (muble<> {:gameon false}) ]
+        impl (muble<> {:gameOn? false})]
     (reify
 
       GameImpl
 
       (start [me _]
-        (let [p1 (reifyPlayer (long \X) \X (first players))
-              p2 (reifyPlayer (long \O) \O (last players))]
+        (let [p1 (reifyPlayer (long \X) \X (first sessions))
+              p2 (reifyPlayer (long \O) \O (last sessions))]
           (.registerPlayers me p1 p2)
           (.dequeue me nil)))
 
-      (onEvent [me evt]
+      (onEvent [me ss evt]
         (log/debug "game engine got an update %s" evt)
         (cond
-          (and (= Events/PRIVATE (:type evt))
-               (= Events/PLAY_MOVE (:code evt)))
-          (let [pss (:context evt)
-                src (:source evt)
-                cmd (readJsonKW src)]
-            (log/debug "rec'ved cmd %s from session %s" src pss)
-            (.enqueue me cmd))))
+          (and (isPrivate? evt)
+               (isCode? Events/PLAY_MOVE evt))
+          (let [s (:source evt)]
+            (log/debug "rec'ved cmd %s from session %s" s ss)
+            (. me enqueue (readJsonStrKW s)))))
 
       BoardAPI
 
       (getCur [_] (aget #^"[Ljava.lang.Object;" actors 0))
-      (isActive [_] (.getv impl :gameon))
+      (isActive [_] (.getv impl :gameOn?))
 
       (registerPlayers [this p1 p2]
-        (let [which (if (> (randomSign) 0) p1 p2)]
+        (let [which (if (> (randSign) 0) p1 p2)]
           (aset #^"[Ljava.lang.Object;" actors 0 which)
           (aset #^"[Ljava.lang.Object;" actors 2 p2)
           (aset #^"[Ljava.lang.Object;" actors 1 p1)
-          (.setv impl :gameon true)))
+          (.setv impl :gameOn? true)))
 
       (getPlayer2 [_] (aget #^"[Ljava.lang.Object;" actors 2))
       (getPlayer1 [_] (aget #^"[Ljava.lang.Object;" actors 1))
@@ -150,60 +148,56 @@
       (dequeue [this cmd]
         (let [cp (.getCur this)
               op (.getOther this cp)
-              gvs (vec grid)
-              src (if (some? cmd)
-                    {:grid (vec grid) :cmd cmd}
-                    {:grid (vec grid)})
+              src {:grid (vec grid)}
+              src (if (map? cmd)
+                    (assoc src :cmd cmd) src)
               ^Session cpss (:session cp)
               ^Session opss (:session op)]
-          (->> (reifySSEvent Events/POKE_WAIT
-                             (assoc src :pnum (.number opss))
-                             opss)
-               (.sendMsg room))
-          (->> (reifySSEvent Events/POKE_MOVE
-                             (assoc src :pnum (.number cpss))
-                             cpss)
-               (.sendMsg room))))
+          (.send room
+                 (privateEvent<> Events/POKE_WAIT
+                                 (assoc src
+                                        :pnum (.number opss)) opss))
+          (.send room
+                 (privateEvent<> Events/POKE_MOVE
+                                 (assoc src
+                                        :pnum (.number cpss)) cpss))))
 
       (repoke [this]
         (let [^Session pss (:session (.getCur this))]
-          (->> (reifySSEvent Events/POKE_MOVE
-                             {:pnum (.number pss)
-                              :grid (vec grid) }
-                             pss)
-               (.sendMsg room))))
+          (.send room
+                 (privateEvent<> Events/POKE_MOVE
+                                 {:pnum (.number pss)
+                                  :grid (vec grid) } pss))))
 
       (enqueue [this src]
         (let [cmd (dissoc src :grid)
+              cval (:value cmd)
+              cell (:cell cmd)
               gvs (:grid src)]
-          (if (and (>= (:cell cmd) 0)
-                   (< (:cell cmd) numcells)
-                   (= (:value (.GetCur this)
-                              (:value cmd)))
-                   (= _cvz_ (aget grid (:cell cmd))))
+          (if (and (>= cell 0)
+                   (< cell numcells)
+                   (= (:value (.getCur this)) cval)
+                   (= _cvz_ (aget grid cell)))
             (do
-              (aset ^longs grid (:cell cmd)
-                    (long (:value cmd)))
+              (aset ^longs grid cell (long cval))
               (.checkWin this cmd))
             (.repoke this))))
 
       (checkWin [this cmd]
-        (log/debug "checking for win %s, pos= %s"
-                   (:color cmd)
-                   (:cell cmd))
         (log/debug "current grid = %s" (vec grid))
-        (if-some [combo (.isWinner this (.getCur this)) ]
+        (log/debug "checking for %s" cmd)
+        (if-some [combo (.isWinner this
+                                   (.getCur this))]
           (.endGame this cmd combo)
           (if (.isStalemate this)
             (.drawGame this cmd)
             (.toggleActor this cmd))))
 
       (broadcastStatus [this ecode data status]
-        (let [src (merge {:grid (vec grid)
-                          :status status }
-                         data)]
-          (->> (reifyNWEvent ecode src)
-               (.sendMsg room))))
+        (.broadcast room
+                    (publicEvent<> ecode
+                                   (merge {:grid (vec grid)
+                                           :status status} data))))
 
       (drawGame [this cmd]
         (.onStopReset this)
@@ -217,35 +211,32 @@
           (.onStopReset this)
           (.broadcastStatus this
                             Events/STOP
-                            {:cmd cmd :combo combo}
-                            (.number pss))))
+                            {:cmd cmd :combo combo} (.number pss))))
 
       (toggleActor [this cmd]
-        (aset #^"[Ljava.lang.Object;" actors 0
+        (aset #^"[Ljava.lang.Object;"
+              actors 0
               (.getOther this (.getCur this)))
         (.dequeue this cmd))
 
       (finz [this] (.onStopReset this))
 
       (onStopReset [this]
-        (.setv impl :gameon false))
+        (.setv impl :gameOn? false))
 
       (isStalemate [_]
-        (not (some #(== _cvz_ %) (seq grid))))
+        (not (some #(= _cvz_ %) (seq grid))))
 
       (isWinner [this actor]
         (log/debug "test isWinner - actor value = %s" (:value actor))
         (some (fn [r]
                 (if (every? #(= (:value actor) %)
-                            ;;(map #(aget grid %) r))
-                            (let [xxx
-                            (amap ^longs r idx ret
-                                  (long (aget ^longs grid (aget ^longs r idx))))]
+                            (let [xxx (amap ^longs r idx ret
+                                            (long (aget ^longs grid
+                                                        (aget ^longs r idx))))]
                               (log/debug "test one row === %s" (vec xxx))
                               xxx))
-                  (vec r)
-                  nil))
-              goalspace))
+                  (vec r))) goalspace))
 
       (getOther [_ cp]
         (condp identical? cp

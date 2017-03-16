@@ -12,8 +12,9 @@
   [[org.clojure/clojurescript "1.9.495"]
    [org.clojure/clojure "1.8.0"]
    [commons-logging "1.2"]
-   [junit/junit "4.12" :scope "test"]
+   ;;[junit/junit "4.12" :scope "test"]
    [io.czlab/wabbit-cons "1.0.0"]
+   [io.czlab/loki "1.0.0"]
    [io.czlab/wabbit "1.0.0"]]
 
   :plugins [[wabbit/lein-template "1.0.0"]
@@ -43,10 +44,10 @@
             "run" ["trampoline"
                    "run" "-m" "czlab.wabbit.sys.core"]}
 
-  :java-source-paths ["src/main/java" "src/test/java"]
+  ;;:java-source-paths ["src/main/java"]
   :source-paths ["src/main/clojure"]
   :test-paths ["src/test/clojure"]
-  :resource-paths ["src/main/resources"]
+  ;;:resource-paths ["src/main/resources"]
 
   :jvm-opts ["-Dlog4j.configurationFile=file:etc/log4j2c.xml"]
   :javac-options ["-source" "8"

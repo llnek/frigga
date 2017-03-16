@@ -19,7 +19,8 @@
 
   (:require [czlab.basal.logging :as log])
 
-  (:use [czlab.basal.format]
+  (:use [czlab.loki.net.core]
+        [czlab.basal.format]
         [czlab.basal.core]
         [czlab.basal.str])
 
@@ -44,7 +45,9 @@
 (defprotocol TableAPI
   ""
   (registerPlayers [_ p1 p2])
+  (updateArena [_])
   (innards [_] )
+  (room [_])
   (getPlayer2 [_])
   (getPlayer1 [_])
   (enqueue [_ cmd]))
@@ -53,15 +56,13 @@
 ;;
 (defn- reifyPlayer
   "" [idValue pcolor psession]
-
-  {:value idValue
-   :color pcolor
-   :session psession })
+  (doto {:value idValue
+         :color pcolor
+         :session psession }))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- reifyObject "" [x y w h]
-
   (muble<> {:x x :y y
             :vx 0 :vy 0
             :height h :width w}))
@@ -76,9 +77,8 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- rectXrect
+(defn- rectXrect?
   "If 2 rects intersect" [ra rb]
-
   (not (or (< (:right ra) (:left rb))
            (< (:right rb) (:left ra))
            (< (:top ra) (:bottom rb))
@@ -172,16 +172,15 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- collide?
-  "Check if the ball has collided with a paddle"
-  [^Muble p1 ^Muble p2
-   ^Muble ball bbox port?]
+  "If the ball has collided with a paddle"
+  [^Muble p1 ^Muble p2 ^Muble ball bbox port?]
 
   (with-local-vars [winner 0]
     (let [hh (halve (.getv ball :height))
           hw (halve (.getv ball :width))
           br (rect ball)]
       (let [r (rect p2)]
-        (if (rectXrect br r)
+        (if (rectXrect? br r)
           (if port?
             (do
               (.setv ball :vy (- (.getv ball :vy)))
@@ -192,7 +191,7 @@
           (when (> (:bottom br)(:top r))
             (var-set winner 1))))
       (let [r (rect p1)]
-        (if (rectXrect br r)
+        (if (rectXrect? br r)
           (if port?
             (do
               (.setv ball :vy (- (.getv ball :vy)))
@@ -207,10 +206,11 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- maybeStartNewPoint
-  "A point has been won, let the UI know, and reset local entities"
-  [^czlab.frigga.pong.core.TableAPI arena ^GameRoom room winner]
+  "Point won, let the UI know, reset entities"
+  [^czlab.frigga.pong.core.TableAPI arena winner]
 
   (let [^Muble impl (.innards arena)
+        ^GameRoom room (.room arena)
         s2 (.getv impl :score2)
         s1 (.getv impl :score1)]
     (->> {:scores {:py2 s2 :py1 s1 }}
@@ -245,118 +245,15 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- updatePoint
-  "A point has been won. Update the score,
-   and maybe trigger game-over"
-  [^czlab.frigga.pong.core.TableAPI arena ^GameRoom room winner]
-
-  (let [^Muble impl (.innards arena)
-        nps (.getv impl :numpts)
-        s2 (.getv impl :score2)
-        s1 (.getv impl :score1)
-        sx (if (= winner 2)
-             (inc s2)
-             (inc s1))]
-    (log/debug "increment score by 1, %s%s,%s"
-               "someone lost a point" s1  s2)
-    (.setv impl :sync false)
-    (if (= winner 2)
-      (.setv impl :score2 sx)
-      (.setv impl :score1 sx))
-    (maybeStartNewPoint arena room winner)
-    (when (>= sx nps) (gameOver arena winner))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- updateEntities
-  "Move local entities per game loop"
-  [^czlab.frigga.pong.core.TableAPI arena ^GameRoom room dt bbox]
-
-  (let [^Muble impl (.innards arena)
-        ^Muble pad2 (.getv impl :paddle2)
-        ^Muble pad1 (.getv impl :paddle1)
-        ^Muble ball (.getv impl :ball)
-        port? (.getv impl :portrait)]
-    (if port?
-      (do
-        (.setv pad2 :x (+ (* dt (.getv pad2 :vx))
-                           (.getv pad2 :x)))
-        (.setv pad1 :x (+ (* dt (.getv pad1 :vx))
-                           (.getv pad1 :x))))
-      (do
-        (.setv pad2 :y (+ (* dt (.getv pad2 :vy))
-                           (.getv pad2 :y)))
-        (.setv pad1 :y (+ (* dt (.getv pad1 :vy))
-                           (.getv pad1 :y)))))
-
-    (clamp pad2 bbox port?)
-    (clamp pad1 bbox port?)
-    (traceEnclosure ball dt bbox port?)
-
-    (let [winner (collide? pad1 pad2 ball bbox port?)]
-      (when (> winner 0)
-        (updatePoint arena room winner)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- syncClients
-  "Update UI with states of local entities"
-  [^czlab.frigga.pong.core.TableAPI arena ^GameRoom room]
-
-  (let [^Muble impl (.innards arena)
-        port? (.getv impl :portrait)
-        ^Muble
-        pad2 (.getv impl :paddle2)
-        ^Muble
-        pad1 (.getv impl :paddle1)
-        ^Muble
-        ball (.getv impl :ball)
-        src {:p2 {:y (.getv pad2 :y)
-                  :x (.getv pad2 :x)
-                  :pv (if port?
-                        (.getv pad2 :vx)
-                        (.getv pad2 :vy))}
-             :p1 {:y (.getv pad1 :y)
-                  :x (.getv pad1 :x)
-                  :pv (if port?
-                        (.getv pad1 :vx)
-                        (.getv pad1 :vy))}
-             :ball {:y (.getv ball :y)
-                    :x (.getv ball :x)
-                    :vy (.getv ball :vy)
-                    :vx (.getv ball :vx) }} ]
-    (log/debug "sync new BALL values %s" (:ball src))
-    (->> (eventObj<> Events/PUBLIC
-                     Events/SYNC_ARENA src)
-         (.send room))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- updateArena
-  "Update the state of the Arena per game loop"
-  [^czlab.frigga.pong.core.TableAPI arena ^GameRoom room options]
-
-  (let [^Muble impl (.innards arena)]
-    (if-not (true? (.getv impl :resetting-point))
-      (let [{:keys[syncMillis numpts world]}
-            options
-            lastTick (.getv impl :lastTick)
-            lastSync (.getv impl :lastSync)
-            now (System/currentTimeMillis)]
-        ;; --- update the game with the difference
-        ;;in ms since the
-        ;; --- last tick
-        (let [diff (- now lastTick)
-              lastSync2 (+ lastSync diff)]
-          (updateEntities arena room (/ diff 1000) world)
-          (.setv impl :lastSync lastSync2)
-          (.setv impl :lastTick now)
-          ;; --- check if time to send a ball update
-          (when (> lastSync syncMillis)
-            (when (.getv impl :sync)
-              (syncClients arena room))
-            (.setv impl :lastSync 0)))))))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- postUpdateArena
@@ -502,6 +399,93 @@
             (.setv other :vy pv))
           (->> (reifySSEvent Events/SYNC_ARENA cmd pt)
                (.send room))))
+
+      "Update the state of the Arena per game loop"
+      (updateArena [this]
+        (if-not (true? (.getv impl :resetting-point))
+          (let [{:keys[syncMillis numpts world]}
+                @options
+                lastTick (.getv impl :lastTick)
+                lastSync (.getv impl :lastSync)
+                now (System/currentTimeMillis)]
+            ;; --- update the game with the difference
+            ;;in ms since the
+            ;; --- last tick
+            (let [diff (- now lastTick)
+                  lastSync2 (+ lastSync diff)]
+              (.updateEntities this (/ diff 1000) world)
+              (.setv impl :lastSync lastSync2)
+              (.setv impl :lastTick now)
+              ;; --- check if time to send a ball update
+              (when (> lastSync syncMillis)
+                (when (.getv impl :sync)
+                  (.syncClients this))
+                (.setv impl :lastSync 0))))))
+
+      "Update UI with states of local entities"
+      (syncClients [this]
+        (let [port? (.getv impl :portrait)
+              ^Muble pad2 (.getv impl :paddle2)
+              ^Muble pad1 (.getv impl :paddle1)
+              ^Muble ball (.getv impl :ball)
+              src {:p2 {:y (.getv pad2 :y)
+                        :x (.getv pad2 :x)
+                        :pv (if port?
+                              (.getv pad2 :vx)
+                              (.getv pad2 :vy))}
+                   :p1 {:y (.getv pad1 :y)
+                        :x (.getv pad1 :x)
+                        :pv (if port?
+                              (.getv pad1 :vx)
+                              (.getv pad1 :vy))}
+                   :ball {:y (.getv ball :y)
+                          :x (.getv ball :x)
+                          :vy (.getv ball :vy)
+                          :vx (.getv ball :vx)}}]
+          (log/debug "sync new BALL values %s" (:ball src))
+          (.broadcast room
+                      (publicEvent<> Events/SYNC_ARENA src))))
+
+      ;;"A point has been won. Update the score, and maybe trigger game-over"
+      (updatePoint [this winner]
+        (let [nps (.getv impl :numpts)
+              s2 (.getv impl :score2)
+              s1 (.getv impl :score1)
+              sx (if (= winner 2) (inc s2) (inc s1))]
+          (log/debug "increment score by 1, %s%s,%s"
+                     "someone lost a point" s1  s2)
+          (.setv impl :sync false)
+          (if (= winner 2)
+            (.setv impl :score2 sx)
+            (.setv impl :score1 sx))
+          (.maybeStartNewPoint this winner)
+          (when (>= sx nps) (.gameOver this winner))))
+
+      "Move local entities per game loop"
+      (updateEntities [_ dt bbox]
+        (let [^Muble pad2 (.getv impl :paddle2)
+              ^Muble pad1 (.getv impl :paddle1)
+              ^Muble ball (.getv impl :ball)
+              port? (.getv impl :portrait)]
+          (if port?
+            (do
+              (.setv pad2 :x (+ (* dt (.getv pad2 :vx))
+                                (.getv pad2 :x)))
+              (.setv pad1 :x (+ (* dt (.getv pad1 :vx))
+                                (.getv pad1 :x))))
+            (do
+              (.setv pad2 :y (+ (* dt (.getv pad2 :vy))
+                                (.getv pad2 :y)))
+              (.setv pad1 :y (+ (* dt (.getv pad1 :vy))
+                                (.getv pad1 :y)))))
+          (clamp pad2 bbox port?)
+          (clamp pad1 bbox port?)
+          (traceEnclosure ball dt bbox port?)
+          (let [winner (collide? pad1 pad2 ball bbox port?)]
+            (when (> winner 0)
+              (.updatePoint this winner)))))
+
+
 
       GameImpl
 
