@@ -115,19 +115,22 @@
 
       GameImpl
 
+      (startRound [_ _])
+      (endRound [_])
+
       (start [me _]
         (let [p1 (reifyPlayer (long \X) \X (first sessions))
               p2 (reifyPlayer (long \O) \O (last sessions))]
           (.registerPlayers me p1 p2)
           (.dequeue me nil)))
 
-      (onEvent [me ss evt]
+      (onEvent [me evt]
         (log/debug "game engine got an update %s" evt)
         (cond
           (and (isPrivate? evt)
                (isCode? Events/PLAY_MOVE evt))
           (let [s (:source evt)]
-            (log/debug "rec'ved cmd %s from session %s" s ss)
+            (log/debug "rec'ved cmd %s from session %s" s (:session evt))
             (. me enqueue (readJsonStrKW s)))))
 
       BoardAPI
