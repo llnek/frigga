@@ -26,7 +26,7 @@
         [czlab.basal.str])
 
   (:import [czlab.loki.game GameImpl GameRoom]
-           [czlab.loki.core Player Session]
+           [czlab.loki.sys Player Session]
            [czlab.jasal Muble]
            [czlab.loki.net EventError Events]))
 
@@ -47,8 +47,6 @@
   ""
   (registerPlayers [_ p1Wrap p2Wrap])
   (maybeStartNewPoint [_ winner])
-  (getPlayer2 [_] )
-  (getPlayer1 [_] )
   (gameOver [_ winner])
   (restart [_ _])
   (enqueue [_ evt])
@@ -60,7 +58,6 @@
   (syncClients [_] )
   (updatePoint [_ winner] )
   (updateEntities [_ dt bbox] ))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -223,31 +220,23 @@
           (.setv :p2 p2Wrap)
           (.setv :p1 p1Wrap)))
 
-      (getPlayer2 [_] (:player (.getv impl :p2)))
-      (getPlayer1 [_] (:player (.getv impl :p1)))
-
-      ;;"Game over.  Let the UI know"
       (gameOver [_ winner]
         (let [s2 (.getv impl :score2)
               s1 (.getv impl :score1)
               src {:winner {:pnum winner
                             :scores {:ps2 s2 :ps1 s1}}}]
           (log/debug "game over: winner is %s" src)
-          (.broadcast room
-                      (publicEvent<> Events/SYNC_ARENA src))
-          (.broadcast room
-                      (publicEvent<> Events/STOP nil))))
+          (syncArena! room src)
+          (stop! room {})))
 
-      ;;"Point won, let the UI know, reset entities"
       (maybeStartNewPoint [this winner]
         (let [s2 (.getv impl :score2)
               s1 (.getv impl :score1)]
-         (.broadcast room
-                     (publicEvent<> Events/SYNC_ARENA
-                                    {:scores {:ps2 s2 :ps1 s1 }}))
+         (syncArena! room
+                     {:scores {:ps2 s2 :ps1 s1 }})
          ;; skip game loop logic until new point starts
          (.setv impl :resetting-pt? true)
-         (.startRound this nil)))
+         (.startRound this {})))
 
       (restart [_ _]
         (doto impl
@@ -262,7 +251,7 @@
               pnum (.number pss)
               kw (if (= pnum 1) :p1 :p2)
               pt (if (= pnum 1) p2 p1)
-              src (:source evt)
+              src (:body evt)
               cmd (readJsonStrKW src)
               ;;pv (* (:dir (kw cmd)) (:speed paddle))
               pv (:pv (kw cmd))
@@ -273,13 +262,13 @@
           (if (.getv impl :portrait?)
             (.setv other :vx pv)
             (.setv other :vy pv))
-          (.send room
-                 (privateEvent<> Events/SYNC_ARENA cmd pt))))
+          (syncArena! room cmd pt)))
 
       ;;"After update, check if either one of the score has reached the target value, and if so, end the game else pause and loop again"
       (postUpdateArena [this]
-        (let [fps (/ 1000 (:framespersec @options))
-              {:keys [numpts]} @options
+        (let [{:keys [framespersec numpts]}
+              @options
+              fps (/ 1000 framespersec)
               s2 (.getv impl :score2)
               s1 (.getv impl :score1)]
           (if (and (not (true? (.getv impl :resetting-pt?)))
@@ -317,14 +306,9 @@
                           :vy (.getv ball :vy)
                           :x (.getv ball :x)
                           :y (.getv ball :y)} }]
-          (.send room
-                 (privateEvent<> Events/POKE_MOVE
-                                 {:pnum (.number p2)} p2))
-          (.send room
-                 (privateEvent<> Events/POKE_MOVE
-                                 {:pnum (.number p1)} p1))
-          (.send room
-                 (publicEvent<> Events/SYNC_ARENA src))
+          (pokeMove! room {:pnum (.number p2)} p2)
+          (pokeMove! room {:pnum (.number p1)} p1)
+          (syncArena! room src)
           (log/debug "setting default ball values %s" src)))
 
       ;;"Initialize all local entities"
@@ -390,8 +374,7 @@
                           :vy (.getv ball :vy)
                           :vx (.getv ball :vx)}}]
           (log/debug "sync new BALL values %s" (:ball src))
-          (.broadcast room
-                      (publicEvent<> Events/SYNC_ARENA src))))
+          (syncArena! room src)))
 
       ;;"A point has been won. Update the score, and maybe trigger game-over"
       (updatePoint [this winner]
@@ -458,12 +441,10 @@
 
       (onEvent [this evt]
         (log/debug "game engine got an update %s" evt)
-        (cond
-          (and (isPrivate? evt)
-               (isCode? Events/PLAY_MOVE evt))
-          (let [{:keys [source context]} evt]
+        (if (isMove? evt)
+          (let [{:keys [body context]} evt]
             (log/debug "received paddle-move %s%s%s"
-                       source " from session " context)
+                       body " from session " context)
             (.enqueue this evt)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

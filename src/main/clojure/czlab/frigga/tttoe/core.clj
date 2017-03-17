@@ -13,7 +13,7 @@
 ;; Copyright (c) 2013-2016, Kenneth Leung. All rights reserved.
 
 (ns ^{:doc ""
-      :author "kenl"}
+      :author "Kenneth Leung"}
 
   czlab.frigga.tttoe.core
 
@@ -26,7 +26,7 @@
         [czlab.basal.str])
 
   (:import [czlab.loki.game GameImpl GameRoom]
-           [czlab.loki.core Player Session]
+           [czlab.loki.sys Player Session]
            [czlab.loki.net EventError Events]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -82,7 +82,7 @@
 ;;
 (defprotocol BoardAPI
   ""
-  (broadcastStatus [_ ecode cmd status] )
+  (fmtStatus [_ cmd status] )
   (registerPlayers [_ p1 p2])
   (getCur [_])
   (getOther [_ a])
@@ -126,12 +126,10 @@
 
       (onEvent [me evt]
         (log/debug "game engine got an update %s" evt)
-        (cond
-          (and (isPrivate? evt)
-               (isCode? Events/PLAY_MOVE evt))
-          (let [s (:source evt)]
+        (if (isMove? evt)
+          (let [s (:body evt)]
             (log/debug "rec'ved cmd %s from session %s" s (:session evt))
-            (. me enqueue (readJsonStrKW s)))))
+            (.enqueue me (readJsonStrKW s)))))
 
       BoardAPI
 
@@ -156,21 +154,16 @@
                     (assoc src :cmd cmd) src)
               ^Session cpss (:session cp)
               ^Session opss (:session op)]
-          (.send room
-                 (privateEvent<> Events/POKE_WAIT
-                                 (assoc src
-                                        :pnum (.number opss)) opss))
-          (.send room
-                 (privateEvent<> Events/POKE_MOVE
-                                 (assoc src
-                                        :pnum (.number cpss)) cpss))))
+          (pokeWait! room
+                     (assoc src :pnum (.number opss)) opss)
+          (pokeMove! room
+                     (assoc src :pnum (.number cpss)) cpss)))
 
       (repoke [this]
         (let [^Session pss (:session (.getCur this))]
-          (.send room
-                 (privateEvent<> Events/POKE_MOVE
-                                 {:pnum (.number pss)
-                                  :grid (vec grid) } pss))))
+          (pokeMove! room
+                     {:pnum (.number pss)
+                      :grid (vec grid) } pss)))
 
       (enqueue [this src]
         (let [cmd (dissoc src :grid)
@@ -196,25 +189,21 @@
             (.drawGame this cmd)
             (.toggleActor this cmd))))
 
-      (broadcastStatus [this ecode data status]
-        (.broadcast room
-                    (publicEvent<> ecode
-                                   (merge {:grid (vec grid)
-                                           :status status} data))))
+      (fmtStatus [_ data status]
+        (merge {:grid (vec grid) :status status} data))
 
       (drawGame [this cmd]
         (.onStopReset this)
-        (.broadcastStatus this
-                          Events/STOP
-                          {:cmd cmd :combo []} 0))
+        (stop! this (.fmtStatus this
+                                {:cmd cmd :combo []} 0)))
 
       (endGame [this cmd combo]
-        (let [^Session pss (:session (.getCur this))]
+        (let [^Session pss (:session (.getCur this))
+              pnum (.number pss)]
           (log/debug "game to end, winner found! combo = %s" combo)
           (.onStopReset this)
-          (.broadcastStatus this
-                            Events/STOP
-                            {:cmd cmd :combo combo} (.number pss))))
+          (stop! this
+                 (.fmtStatus this {:cmd cmd :combo combo} pnum))))
 
       (toggleActor [this cmd]
         (aset #^"[Ljava.lang.Object;"
