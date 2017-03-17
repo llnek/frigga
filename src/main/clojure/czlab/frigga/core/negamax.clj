@@ -23,8 +23,8 @@
   (:use [czlab.basal.core]
         [czlab.basal.str])
 
-  (:import [czlab.loki.game Board]
-           [czlab.loki.core Player Session]))
+  (:import [czlab.loki.game Board]))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;(set! *warn-on-reflection* true)
