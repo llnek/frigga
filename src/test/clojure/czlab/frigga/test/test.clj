@@ -11,6 +11,10 @@
 
   czlab.frigga.test.test
 
+  (:require [czlab.convoy.nettio.client :as cc])
+
+  (:import [czlab.convoy.nettio WSClientConnect])
+
   (:use [czlab.wabbit.sys.core]
         [czlab.basal.core]
         [czlab.basal.str]
@@ -25,7 +29,7 @@
        ";MVCC=TRUE;AUTO_RECONNECT=TRUE"))
 (def ^:private _conf_
   {:locale {:country "US" :lang "en"}
-   :info {:digest "769a36bc3e2c4f1587ec0de7d6e6ba19"
+   :info {:digest "some-digest"
           :encoding "utf-8" }
    :rdbms {:default {:driver "org.h2.Driver"
                      :url _dburl_
@@ -33,24 +37,38 @@
                      :passwd ""}}
    :plugins {:web
              {:$pluggable :czlab.wabbit.plugs.io.http/HTTP
+              :host "localhost"
               :port 9090
               :wsockPath #{ "/loki/ttt" "/loki/pong"}
               :routes
-              [{:handler "czlab.loki.sys.core/lokiHandler"
+              [{:handler :czlab.loki.sys.core/lokiHandler
                 :uri "/loki/(.*)" }] } } })
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- wscb [a b] )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (deftest tcase1
 
   (is (do->true
-        (startViaConfig *tempfile-repo* _conf_)))
+        (startViaConfig *tempfile-repo* _conf_)
+        (pause 1000)))
 
-  (pause 5000)
-  (is (= 1 1))
+  (is (let [h (cc/wsconnect<> "localhost"
+                          9090
+                          "/loki/ttt"
+                          wscb)
+            ^WSClientConnect c (deref h 5000 nil)]
+        (when c
+          (.write c "{}"))
+        true))
 
-)
+  (pause 3000)
+
+  (is (string? "That's all folks!")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;EOF
