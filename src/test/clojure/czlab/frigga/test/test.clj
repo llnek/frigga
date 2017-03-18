@@ -30,7 +30,19 @@
        ";MVCC=TRUE;AUTO_RECONNECT=TRUE"))
 (def ^:private _conf_
   {:locale {:country "US" :lang "en"}
+   :games
+   {:tictactoe
+    {:uuid  "bd5f79bbeb414ed5bb442529dc27ed3c"
+     :layout  :portrait :height  480 :width  320
+     :network {:minp 2 :maxp 2
+               :arena :czlab.frigga.tttoe.core/tictactoe }}
+    :pong
+    {:uuid  "fa0860f976dc41358bc7bd5af3147d55"
+     :layout :portrait :height  480 :width  320
+     :network {:minp 2 :maxp 2
+               :arena  :czlab.frigga.pong.core/pong } }}
    :info {:digest "some-digest"
+          :main :czlab.frigga.sys.core/friggaMain
           :encoding "utf-8" }
    :rdbms {:default {:driver "org.h2.Driver"
                      :url _dburl_
