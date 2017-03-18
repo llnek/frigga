@@ -60,7 +60,25 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- wscb [a b] )
+(def ^:private con2 (atom nil))
+(def ^:private con1 (atom nil))
+(def ^:private res2 (atom nil))
+(def ^:private res1 (atom nil))
+
+(defn- con1cb [a b] )
+
+
+
+(defn- wsconn "" [cb]
+  (cc/wsconnect<> "localhost" 9090 "/loki/tictactoe" cb))
+
+(defn- req-game "" [^WSClientConnect c user pwd]
+  (->> {:type 3 :code 600
+        :body {:gameid "bd5f79bbeb414ed5bb442529dc27ed3c"
+               :principal user
+               :credential pwd}}
+       writeJsonStr
+       (.write c )))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -70,19 +88,22 @@
         (startViaConfig *tempfile-repo* _conf_)
         (pause 1000)))
 
-  (is (let [h (cc/wsconnect<> "localhost"
-                          9090
-                          "/loki/tictactoe"
-                          wscb)
+  (is (let [h (wsconn<> con1cb)
             ^WSClientConnect c (deref h 5000 nil)]
-        (when c
-          (.write c (-> {:type 3
-                         :code 600
-                         :body {:gameid "bd5f79bbeb414ed5bb442529dc27ed3c"
-                                :principal "joe"
-                                :credential "secret"}}
-                        (writeJsonStr))))
-        true))
+        (if (some? c)
+          (do->true (reset! con1 c)))))
+
+  (is (let [h (wsconn<> con2cb)
+            ^WSClientConnect c (deref h 5000 nil)]
+        (if (some? c)
+          (do->true (reset! con2 c)))))
+
+  (is (let []
+        (req-game @con1 "joe" "secret")
+        (pause 1000)))
+
+
+
 
   (pause 3000)
 
