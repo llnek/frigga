@@ -16,6 +16,7 @@
   (:import [czlab.convoy.nettio WSClientConnect])
 
   (:use [czlab.wabbit.sys.core]
+        [czlab.basal.format]
         [czlab.basal.core]
         [czlab.basal.str]
         [czlab.basal.io]
@@ -37,12 +38,12 @@
                      :passwd ""}}
    :plugins {:web
              {:$pluggable :czlab.wabbit.plugs.io.http/HTTP
+              :handler :czlab.loki.sys.core/lokiHandler
               :host "localhost"
               :port 9090
-              :wsockPath #{ "/loki/ttt" "/loki/pong"}
+              :wsockPath #{ "/loki/tictactoe" "/loki/pong"}
               :routes
-              [{:handler :czlab.loki.sys.core/lokiHandler
-                :uri "/loki/(.*)" }] } } })
+              [{:uri "/loki/(.*)" }] } } })
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -59,11 +60,16 @@
 
   (is (let [h (cc/wsconnect<> "localhost"
                           9090
-                          "/loki/ttt"
+                          "/loki/tictactoe"
                           wscb)
             ^WSClientConnect c (deref h 5000 nil)]
         (when c
-          (.write c "{}"))
+          (.write c (-> {:type 3
+                         :code 600
+                         :body {:gameid "bd5f79bbeb414ed5bb442529dc27ed3c"
+                                :principal "joe"
+                                :credential "secret"}}
+                        (writeJsonStr))))
         true))
 
   (pause 3000)

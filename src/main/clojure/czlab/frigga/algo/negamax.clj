@@ -15,7 +15,7 @@
 (ns ^{:doc ""
       :author "kenl"}
 
-  czlab.frigga.core.negamax
+  czlab.frigga.algo.negamax
 
   (:require [czlab.basal.logging :as log]
             [clojure.string :as cs])

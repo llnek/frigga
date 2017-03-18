@@ -49,7 +49,7 @@
   :test-paths ["src/test/clojure"]
   ;;:resource-paths ["src/main/resources"]
 
-  :jvm-opts ["-Dlog4j.configurationFile=file:etc/log4j2c.xml"]
+  :jvm-opts ["-Dlog4j.configurationFile=file:etc/log4j2d.xml"]
   :javac-options ["-source" "8"
                   "-Xlint:unchecked" "-Xlint:-options" "-Xlint:deprecation"])
 
