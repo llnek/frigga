@@ -59,34 +59,59 @@
               :routes
               [{:uri "/loki/(.*)" }] } } })
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (def ^:private con2 (atom nil))
 (def ^:private con1 (atom nil))
 (def ^:private res2 (atom #{}))
 (def ^:private res1 (atom #{}))
+(def ^:private info2 (atom nil))
+(def ^:private info1 (atom nil))
+(def ^:private moves2 (atom [0 1 2]))
+(def ^:private moves1 (atom [6 7 8]))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- makeMove "" [con info moves body]
+  (let [{:keys [pnum value color]} @info
+        {:keys [grid]} body
+        _ (assert (= pnum (:pnum body)))
+        c (if-some [m (first @moves)]
+            (do (reset! moves (drop 1 @moves)) m))]
+    (when c
+      (->> {:value value :cell c}
+           (privateEvent<> Events/PLAY_MOVE )
+           writeJsonStr
+           (.write @con)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- concb [id con res c m]
+(defn- concb [id con info moves res c m]
   (let [{:keys [type code body] :as msg}
-        (readJsonStrKW (:text m))
-        {:keys [room]}
-        body]
+        (readJsonStrKW (:text m))]
     (prn!! "CB>>>>>>: con= %s, msg = %s" id msg)
     (cond
       (= Events/PLAYREQ_OK code)
-      (swap! res conj code)
+      (do
+        ;;{:puid :pnum :game :room }
+        (reset! info  body)
+        (swap! res conj code))
 
       (= Events/START code)
-      (swap! res conj code)
+      (let [{:keys [puid pnum game room]} @info
+            b (get body (keyword puid))]
+        ;;pick the extra stuff { :session_number :value :color }
+        (swap! info merge b)
+        (swap! res conj code))
 
       (= Events/POKE_WAIT code)
-      (swap! res conj code)
+      (do
+        (swap! res conj code))
 
       (= Events/POKE_MOVE code)
-      (swap! res conj code))))
+      (do
+        (makeMove con info moves body)
+        (swap! res conj code)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -111,12 +136,12 @@
         (startViaConfig *tempfile-repo* _conf_)
         (pause 1000)))
 
-  (is (let [h (wsconn<> (partial concb "1" con1 res1))
+  (is (let [h (wsconn<> (partial concb "1" con1 info1 moves1 res1))
             ^WSClientConnect c (deref h 5000 nil)]
         (if (some? c)
           (do->true (reset! con1 c)))))
 
-  (is (let [h (wsconn<> (partial concb "2" con2 res2))
+  (is (let [h (wsconn<> (partial concb "2" con2 info2 moves2 res2))
             ^WSClientConnect c (deref h 5000 nil)]
         (if (some? c)
           (do->true (reset! con2 c)))))
@@ -141,7 +166,7 @@
              (or (contains? @res2 Events/POKE_MOVE)
                  (contains? @res2 Events/POKE_WAIT)))))
 
-  (pause 3000)
+  (pause 10000)
 
   (is (string? "That's all folks!")))
 

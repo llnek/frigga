@@ -115,22 +115,34 @@
 
       GameImpl
 
+      (playerGist [me id]
+        (some #(let [s (:session %)]
+                 (if (= id
+                        (.. ^Session
+                            s
+                            player id))
+                   (dissoc % :session))) (drop 1 actors)))
+
       (startRound [_ _])
       (endRound [_])
 
+      (init [me arg]
+        (log/debug "tictactoe: init called()")
+        (let [p1 (reifyPlayer (long \X) "X" (first sessions))
+              p2 (reifyPlayer (long \O) "O" (last sessions))]
+          (.registerPlayers me p1 p2)))
+
       (start [me _]
         (log/debug "tictactoe: start called()")
-        (let [p1 (reifyPlayer (long \X) \X (first sessions))
-              p2 (reifyPlayer (long \O) \O (last sessions))]
-          (.registerPlayers me p1 p2)
-          (.dequeue me nil)))
+        (.setv impl :gameOn? true)
+        (.dequeue me nil))
 
       (onEvent [me evt]
         (log/debug "game engine got an update %s" evt)
         (if (isMove? evt)
-          (let [s (:body evt)]
-            (log/debug "rec'ved cmd %s from session %s" s (:session evt))
-            (.enqueue me (readJsonStrKW s)))))
+          (let [b (:body evt)]
+            (log/debug "rec'ved cmd %s from session %s" b (:context evt))
+            (.enqueue me b))))
 
       BoardAPI
 
@@ -143,8 +155,7 @@
           (aset #^"[Ljava.lang.Object;" actors 2 p2)
           (aset #^"[Ljava.lang.Object;" actors 1 p1)
           (log/debug "Player2: %s" p2)
-          (log/debug "Player1: %s" p1)
-          (.setv impl :gameOn? true)))
+          (log/debug "Player1: %s" p1)))
 
       (getPlayer2 [_] (aget #^"[Ljava.lang.Object;" actors 2))
       (getPlayer1 [_] (aget #^"[Ljava.lang.Object;" actors 1))
@@ -168,11 +179,9 @@
                      {:pnum (.number pss)
                       :grid (vec grid) } pss)))
 
-      (enqueue [this src]
-        (let [cmd (dissoc src :grid)
-              cval (:value cmd)
-              cell (:cell cmd)
-              gvs (:grid src)]
+      (enqueue [this cmd]
+        (let [cell (or (:cell cmd) 911)
+              cval (:value cmd)]
           (if (and (>= cell 0)
                    (< cell numcells)
                    (= (:value (.getCur this)) cval)
