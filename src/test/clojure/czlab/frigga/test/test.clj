@@ -13,9 +13,11 @@
 
   (:require [czlab.convoy.nettio.client :as cc])
 
-  (:import [czlab.convoy.nettio WSClientConnect])
+  (:import [czlab.convoy.nettio WSClientConnect]
+           [czlab.loki.net Events])
 
   (:use [czlab.wabbit.sys.core]
+        [czlab.loki.net.core]
         [czlab.basal.format]
         [czlab.basal.core]
         [czlab.basal.str]
@@ -35,12 +37,12 @@
     {:uuid  "bd5f79bbeb414ed5bb442529dc27ed3c"
      :layout  :portrait :height  480 :width  320
      :network {:minp 2 :maxp 2
-               :arena :czlab.frigga.tttoe.core/tictactoe }}
+               :impl :czlab.frigga.tttoe.core/tictactoe }}
     :pong
     {:uuid  "fa0860f976dc41358bc7bd5af3147d55"
      :layout :portrait :height  480 :width  320
      :network {:minp 2 :maxp 2
-               :arena  :czlab.frigga.pong.core/pong } }}
+               :impl  :czlab.frigga.pong.core/pong } }}
    :info {:digest "some-digest"
           :main :czlab.frigga.sys.core/friggaMain
           :encoding "utf-8" }
@@ -62,16 +64,37 @@
 ;;
 (def ^:private con2 (atom nil))
 (def ^:private con1 (atom nil))
-(def ^:private res2 (atom nil))
-(def ^:private res1 (atom nil))
+(def ^:private res2 (atom #{}))
+(def ^:private res1 (atom #{}))
 
-(defn- con1cb [a b] )
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- concb [id con res c m]
+  (let [{:keys [type code body] :as msg}
+        (readJsonStrKW (:text m))
+        {:keys [room]}
+        body]
+    (prn!! "CB>>>>>>: con= %s, msg = %s" id msg)
+    (cond
+      (= Events/PLAYREQ_OK code)
+      (swap! res conj code)
 
+      (= Events/START code)
+      (swap! res conj code)
 
+      (= Events/POKE_WAIT code)
+      (swap! res conj code)
 
-(defn- wsconn "" [cb]
+      (= Events/POKE_MOVE code)
+      (swap! res conj code))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- wsconn<> "" [cb]
   (cc/wsconnect<> "localhost" 9090 "/loki/tictactoe" cb))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
 (defn- req-game "" [^WSClientConnect c user pwd]
   (->> {:type 3 :code 600
         :body {:gameid "bd5f79bbeb414ed5bb442529dc27ed3c"
@@ -88,22 +111,35 @@
         (startViaConfig *tempfile-repo* _conf_)
         (pause 1000)))
 
-  (is (let [h (wsconn<> con1cb)
+  (is (let [h (wsconn<> (partial concb "1" con1 res1))
             ^WSClientConnect c (deref h 5000 nil)]
         (if (some? c)
           (do->true (reset! con1 c)))))
 
-  (is (let [h (wsconn<> con2cb)
+  (is (let [h (wsconn<> (partial concb "2" con2 res2))
             ^WSClientConnect c (deref h 5000 nil)]
         (if (some? c)
           (do->true (reset! con2 c)))))
 
   (is (let []
+        (req-game @con2 "mary" "secret")
         (req-game @con1 "joe" "secret")
-        (pause 1000)))
+        (pause 1500)
+        (and (contains? @res1 Events/PLAYREQ_OK)
+             (contains? @res1 Events/START)
+             (contains? @res2 Events/PLAYREQ_OK)
+             (contains? @res2 Events/START))))
 
-
-
+  (is (let []
+        (.write @con2 (writeJsonStr
+                        (privateEvent<> Events/STARTED {})))
+        (.write @con1 (writeJsonStr
+                        (privateEvent<> Events/STARTED {})))
+        (pause 1500)
+        (and (or (contains? @res1 Events/POKE_MOVE)
+                 (contains? @res1 Events/POKE_WAIT))
+             (or (contains? @res2 Events/POKE_MOVE)
+                 (contains? @res2 Events/POKE_WAIT)))))
 
   (pause 3000)
 

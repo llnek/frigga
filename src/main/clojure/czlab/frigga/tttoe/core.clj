@@ -119,6 +119,7 @@
       (endRound [_])
 
       (start [me _]
+        (log/debug "tictactoe: start called()")
         (let [p1 (reifyPlayer (long \X) \X (first sessions))
               p2 (reifyPlayer (long \O) \O (last sessions))]
           (.registerPlayers me p1 p2)
@@ -141,6 +142,8 @@
           (aset #^"[Ljava.lang.Object;" actors 0 which)
           (aset #^"[Ljava.lang.Object;" actors 2 p2)
           (aset #^"[Ljava.lang.Object;" actors 1 p1)
+          (log/debug "Player2: %s" p2)
+          (log/debug "Player1: %s" p1)
           (.setv impl :gameOn? true)))
 
       (getPlayer2 [_] (aget #^"[Ljava.lang.Object;" actors 2))
