@@ -133,8 +133,13 @@
           (.registerPlayers me p1 p2)))
 
       (start [me _]
+        (for [x (range 0 numcells)] (aset-long grid x _cvz_))
         (log/debug "tictactoe: start called()")
+        (log/debug "tictactoe: grid = %s" (vec grid))
         (.setv impl :gameOn? true)
+        (.registerPlayers me
+                          (.getPlayer1 me)
+                          (.getPlayer2 me))
         (.dequeue me nil))
 
       (onEvent [me evt]

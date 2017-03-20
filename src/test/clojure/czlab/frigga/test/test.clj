@@ -67,8 +67,10 @@
 (def ^:private res1 (atom #{}))
 (def ^:private info2 (atom nil))
 (def ^:private info1 (atom nil))
-(def ^:private moves2 (atom [0 1 2]))
-(def ^:private moves1 (atom [6 7 8]))
+(def ^:private m2data [0 1 2])
+(def ^:private m1data [6 7 8])
+(def ^:private moves2 (atom m2data))
+(def ^:private moves1 (atom m1data))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -94,6 +96,13 @@
       (do
         ;;{:puid :pnum :game :room }
         (reset! info  body)
+        (swap! res conj code))
+
+      (= Events/RESTART code)
+      (let [{:keys [puid pnum game room]} @info
+            b (get body (keyword puid))]
+        ;;pick the extra stuff { :session_number :value :color }
+        (swap! info merge b)
         (swap! res conj code))
 
       (= Events/START code)
@@ -175,6 +184,33 @@
         (pause 2000)
         (and (or (contains? @res1 Events/GAME_WON)
              (or (contains? @res2 Events/GAME_WON))))))
+
+  (is (let []
+        (swap! res2 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
+        (swap! res1 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
+        (reset! moves2 m2data)
+        (reset! moves1 m1data)
+        (.write @con1 (writeJsonStr
+                        (privateEvent<> Events/REPLAY {})))
+        (pause 1500)
+        (and (contains? @res1 Events/RESTART)
+             (contains? @res2 Events/RESTART))))
+
+  (is (let []
+        (.write @con2 (writeJsonStr
+                        (privateEvent<> Events/STARTED {})))
+        (.write @con1 (writeJsonStr
+                        (privateEvent<> Events/STARTED {})))
+        (pause 1500)
+        (and (or (contains? @res1 Events/POKE_MOVE)
+                 (contains? @res1 Events/POKE_WAIT))
+             (or (contains? @res2 Events/POKE_MOVE)
+                 (contains? @res2 Events/POKE_WAIT)))))
+
+  (is (let []
+        (pause 2000)
+        (and (or (contains? @res1 Events/GAME_WON)
+                 (contains? @res2 Events/GAME_WON)))))
 
   (is (string? "That's all folks!")))
 
