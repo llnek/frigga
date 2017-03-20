@@ -89,7 +89,6 @@
 (defn- concb [id con info moves res c m]
   (let [{:keys [type code body] :as msg}
         (readJsonStrKW (:text m))]
-    (prn!! "CB>>>>>>: con= %s, msg = %s" id msg)
     (cond
       (= Events/PLAYREQ_OK code)
       (do
@@ -103,6 +102,12 @@
         ;;pick the extra stuff { :session_number :value :color }
         (swap! info merge b)
         (swap! res conj code))
+
+      (= Events/STOP code)
+      (let [s (:status body)]
+        (when (or (= s 2)(= s 1))
+          (prn!! "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" s)
+          (swap! res conj Events/GAME_WON)))
 
       (= Events/POKE_WAIT code)
       (do
@@ -166,7 +171,10 @@
              (or (contains? @res2 Events/POKE_MOVE)
                  (contains? @res2 Events/POKE_WAIT)))))
 
-  (pause 10000)
+  (is (let []
+        (pause 2000)
+        (and (or (contains? @res1 Events/GAME_WON)
+             (or (contains? @res2 Events/GAME_WON))))))
 
   (is (string? "That's all folks!")))
 

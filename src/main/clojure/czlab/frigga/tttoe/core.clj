@@ -206,7 +206,7 @@
 
       (drawGame [this cmd]
         (.onStopReset this)
-        (stop! this (.fmtStatus this
+        (stop! room (.fmtStatus this
                                 {:cmd cmd :combo []} 0)))
 
       (endGame [this cmd combo]
@@ -214,7 +214,7 @@
               pnum (.number pss)]
           (log/debug "game to end, winner found! combo = %s" combo)
           (.onStopReset this)
-          (stop! this
+          (stop! room
                  (.fmtStatus this {:cmd cmd :combo combo} pnum))))
 
       (toggleActor [this cmd]
