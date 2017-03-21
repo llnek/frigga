@@ -25,7 +25,7 @@
         [czlab.basal.core]
         [czlab.basal.str])
 
-  (:import [czlab.loki.game GameImpl Arena]
+  (:import [czlab.loki.game Game Arena]
            [czlab.loki.sys Player Session]
            [czlab.loki.net EventError Events]))
 
@@ -102,7 +102,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn tictactoe
-  "" ^GameImpl [^Arena room sessions]
+  "" ^Game [^Arena room sessions]
 
   (let [grid (long-array (* 3 3) _cvz_)
         goalspace (mapGoalSpace 3)
@@ -111,7 +111,7 @@
         impl (muble<> )]
     (reify
 
-      GameImpl
+      Game
 
       (playerGist [me id]
         (some #(let [s (:session %)]

@@ -25,7 +25,7 @@
         [czlab.basal.core]
         [czlab.basal.str])
 
-  (:import [czlab.loki.game GameImpl Arena]
+  (:import [czlab.loki.game Game Arena]
            [czlab.loki.sys Player Session]
            [czlab.jasal Muble]
            [czlab.loki.net EventError Events]))
@@ -207,7 +207,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn Pong
-  "" ^GameImpl [^Arena room sessions]
+  "" ^Game [^Arena room sessions]
 
   (let [options (atom {})
         impl (muble<>)]
@@ -415,7 +415,7 @@
             (when (> winner 0)
               (.updatePoint this winner)))))
 
-      GameImpl
+      Game
 
       (startRound [this cmd]
         (.initEntities this)
