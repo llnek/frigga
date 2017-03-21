@@ -84,7 +84,7 @@
       (->> {:value value :cell c}
            (privateEvent<> Events/PLAY_MOVE )
            writeJsonStr
-           (.write @con)))))
+           (.write ^WSClientConnect @con)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -170,10 +170,10 @@
              (contains? @res2 Events/START))))
 
   (is (let []
-        (.write @con2 (writeJsonStr
-                        (privateEvent<> Events/STARTED {})))
-        (.write @con1 (writeJsonStr
-                        (privateEvent<> Events/STARTED {})))
+        (.write ^WSClientConnect @con2
+                (writeJsonStr (privateEvent<> Events/STARTED {})))
+        (.write ^WSClientConnect @con1
+                (writeJsonStr (privateEvent<> Events/STARTED {})))
         (pause 1500)
         (and (or (contains? @res1 Events/POKE_MOVE)
                  (contains? @res1 Events/POKE_WAIT))
@@ -190,17 +190,17 @@
         (swap! res1 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
         (reset! moves2 m2data)
         (reset! moves1 m1data)
-        (.write @con1 (writeJsonStr
-                        (privateEvent<> Events/REPLAY {})))
+        (.write ^WSClientConnect @con1
+                (writeJsonStr (privateEvent<> Events/REPLAY {})))
         (pause 1500)
         (and (contains? @res1 Events/RESTART)
              (contains? @res2 Events/RESTART))))
 
   (is (let []
-        (.write @con2 (writeJsonStr
-                        (privateEvent<> Events/STARTED {})))
-        (.write @con1 (writeJsonStr
-                        (privateEvent<> Events/STARTED {})))
+        (.write ^WSClientConnect @con2
+                (writeJsonStr (privateEvent<> Events/STARTED {})))
+        (.write ^WSClientConnect @con1
+                (writeJsonStr (privateEvent<> Events/STARTED {})))
         (pause 1500)
         (and (or (contains? @res1 Events/POKE_MOVE)
                  (contains? @res1 Events/POKE_WAIT))

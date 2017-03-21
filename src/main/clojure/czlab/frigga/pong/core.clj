@@ -25,7 +25,7 @@
         [czlab.basal.core]
         [czlab.basal.str])
 
-  (:import [czlab.loki.game GameImpl GameRoom]
+  (:import [czlab.loki.game GameImpl Arena]
            [czlab.loki.sys Player Session]
            [czlab.jasal Muble]
            [czlab.loki.net EventError Events]))
@@ -207,7 +207,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn Pong
-  "" ^GameImpl [^GameRoom room sessions]
+  "" ^GameImpl [^Arena room sessions]
 
   (let [options (atom {})
         impl (muble<>)]

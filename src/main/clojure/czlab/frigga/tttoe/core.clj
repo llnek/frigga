@@ -25,7 +25,7 @@
         [czlab.basal.core]
         [czlab.basal.str])
 
-  (:import [czlab.loki.game GameImpl Arena GameRoom]
+  (:import [czlab.loki.game GameImpl Arena]
            [czlab.loki.sys Player Session]
            [czlab.loki.net EventError Events]))
 
@@ -102,7 +102,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn tictactoe
-  "" ^GameImpl [^GameRoom room sessions]
+  "" ^GameImpl [^Arena room sessions]
 
   (let [grid (long-array (* 3 3) _cvz_)
         goalspace (mapGoalSpace 3)
@@ -124,9 +124,8 @@
       (startRound [_ _])
       (endRound [_])
 
-      (init [me arg]
+      (init [me _]
         (log/debug "tictactoe: init called()")
-        (.setv impl :arena (:arena arg))
         (let [p1 (reifyPlayer (long \X) "X" (first sessions))
               p2 (reifyPlayer (long \O) "O" (last sessions))]
           (.registerPlayers me p1 p2)))
@@ -224,8 +223,7 @@
               (.getOther this (.getCur this)))
         (.dequeue this cmd))
 
-      (onStopReset [this]
-        (some-> ^Arena (.getv impl :arena) .stop))
+      (onStopReset [_] (.stop room))
 
       (isStalemate [_]
         (not (some #(= _cvz_ %) (seq grid))))
