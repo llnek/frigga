@@ -25,7 +25,7 @@
         [czlab.basal.core]
         [czlab.basal.str])
 
-  (:import [czlab.loki.game GameImpl GameRoom]
+  (:import [czlab.loki.game GameImpl Arena GameRoom]
            [czlab.loki.sys Player Session]
            [czlab.loki.net EventError Events]))
 
@@ -86,7 +86,6 @@
   (registerPlayers [_ p1 p2])
   (getCur [_])
   (getOther [_ a])
-  (isActive [_])
   (getPlayer2 [_])
   (getPlayer1 [_])
   (enqueue [_ cmd])
@@ -97,7 +96,6 @@
   (onStopReset [_])
   (repoke [_])
   (dequeue [_ cmd])
-  (finz [_])
   (isStalemate [_])
   (isWinner [_ a]))
 
@@ -110,7 +108,7 @@
         goalspace (mapGoalSpace 3)
         actors (object-array 3)
         numcells (alength grid)
-        impl (muble<> {:gameOn? false})]
+        impl (muble<> )]
     (reify
 
       GameImpl
@@ -128,19 +126,20 @@
 
       (init [me arg]
         (log/debug "tictactoe: init called()")
+        (.setv impl :arena (:arena arg))
         (let [p1 (reifyPlayer (long \X) "X" (first sessions))
               p2 (reifyPlayer (long \O) "O" (last sessions))]
           (.registerPlayers me p1 p2)))
 
       (start [me _]
-        (for [x (range 0 numcells)] (aset-long grid x _cvz_))
+        (doall
+          (for [x (range 0 numcells)] (aset-long grid x _cvz_)))
         (log/debug "tictactoe: start called()")
         (log/debug "tictactoe: grid = %s" (vec grid))
-        (.setv impl :gameOn? true)
-        (.registerPlayers me
-                          (.getPlayer1 me)
-                          (.getPlayer2 me))
-        (.dequeue me nil))
+        (let [which (if (> (randSign) 0) 1 2)]
+          (->> (aget #^"[Ljava.lang.Object;" actors which)
+               (aset #^"[Ljava.lang.Object;" actors 0))
+          (.dequeue me nil)))
 
       (onEvent [me evt]
         (log/debug "game engine got an update %s" evt)
@@ -152,15 +151,12 @@
       BoardAPI
 
       (getCur [_] (aget #^"[Ljava.lang.Object;" actors 0))
-      (isActive [_] (.getv impl :gameOn?))
 
       (registerPlayers [this p1 p2]
-        (let [which (if (> (randSign) 0) p1 p2)]
-          (aset #^"[Ljava.lang.Object;" actors 0 which)
-          (aset #^"[Ljava.lang.Object;" actors 2 p2)
-          (aset #^"[Ljava.lang.Object;" actors 1 p1)
-          (log/debug "Player2: %s" p2)
-          (log/debug "Player1: %s" p1)))
+        (aset #^"[Ljava.lang.Object;" actors 2 p2)
+        (aset #^"[Ljava.lang.Object;" actors 1 p1)
+        (log/debug "Player2: %s" p2)
+        (log/debug "Player1: %s" p1))
 
       (getPlayer2 [_] (aget #^"[Ljava.lang.Object;" actors 2))
       (getPlayer1 [_] (aget #^"[Ljava.lang.Object;" actors 1))
@@ -228,10 +224,8 @@
               (.getOther this (.getCur this)))
         (.dequeue this cmd))
 
-      (finz [this] (.onStopReset this))
-
       (onStopReset [this]
-        (.setv impl :gameOn? false))
+        (some-> ^Arena (.getv impl :arena) .stop))
 
       (isStalemate [_]
         (not (some #(= _cvz_ %) (seq grid))))
