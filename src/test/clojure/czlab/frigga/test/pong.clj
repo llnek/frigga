@@ -9,7 +9,7 @@
 (ns ^{:doc ""
       :author "Kenneth Leung"}
 
-  czlab.frigga.test.test
+  czlab.frigga.test.pong
 
   (:require [czlab.convoy.nettio.client :as cc])
 
@@ -69,6 +69,8 @@
 (def ^:private info1 (atom nil))
 (def ^:private m2data [0 1 2])
 (def ^:private m1data [6 7 8])
+(def ^:private m2draw [0 1 5 6 8])
+(def ^:private m1draw [2 3 4 7 8])
 (def ^:private moves2 (atom m2data))
 (def ^:private moves1 (atom m1data))
 
@@ -112,11 +114,16 @@
         (swap! info merge b)
         (swap! res conj code))
 
-      (= Events/STOP code)
+      (= Events/GAME_WON code)
       (let [s (:status body)]
-        (when (or (= s 2)(= s 1))
-          (prn!! "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" s)
-          (swap! res conj Events/GAME_WON)))
+        (prn!! "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" s)
+        (swap! res conj Events/GAME_WON))
+
+      (= Events/GAME_TIE code)
+      (let [s (:status body)]
+        (prn!! "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" 0)
+        (swap! res conj Events/GAME_TIE))
+
 
       (= Events/POKE_WAIT code)
       (do
@@ -144,73 +151,104 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(deftest tcase1
+(deftest ^:pong test-pong
 
   (is (do->true
         (startViaConfig *tempfile-repo* _conf_)
         (pause 1000)))
 
-  (is (let [h (wsconn<> (partial concb "1" con1 info1 moves1 res1))
-            ^WSClientConnect c (deref h 5000 nil)]
-        (if (some? c)
-          (do->true (reset! con1 c)))))
+  (testing "related to: win game"
+    (is (let [h (wsconn<> (partial concb "1" con1 info1 moves1 res1))
+              ^WSClientConnect c (deref h 5000 nil)]
+          (if (some? c)
+            (do->true (reset! con1 c)))))
 
-  (is (let [h (wsconn<> (partial concb "2" con2 info2 moves2 res2))
-            ^WSClientConnect c (deref h 5000 nil)]
-        (if (some? c)
-          (do->true (reset! con2 c)))))
+    (is (let [h (wsconn<> (partial concb "2" con2 info2 moves2 res2))
+              ^WSClientConnect c (deref h 5000 nil)]
+          (if (some? c)
+            (do->true (reset! con2 c)))))
 
-  (is (let []
-        (req-game @con2 "mary" "secret")
-        (req-game @con1 "joe" "secret")
-        (pause 1500)
-        (and (contains? @res1 Events/PLAYREQ_OK)
-             (contains? @res1 Events/START)
-             (contains? @res2 Events/PLAYREQ_OK)
-             (contains? @res2 Events/START))))
+    (is (let []
+          (req-game @con2 "mary" "secret")
+          (req-game @con1 "joe" "secret")
+          (pause 1500)
+          (and (contains? @res1 Events/PLAYREQ_OK)
+               (contains? @res1 Events/START)
+               (contains? @res2 Events/PLAYREQ_OK)
+               (contains? @res2 Events/START))))
 
-  (is (let []
-        (.write ^WSClientConnect @con2
-                (writeJsonStr (privateEvent<> Events/STARTED {})))
-        (.write ^WSClientConnect @con1
-                (writeJsonStr (privateEvent<> Events/STARTED {})))
-        (pause 1500)
-        (and (or (contains? @res1 Events/POKE_MOVE)
-                 (contains? @res1 Events/POKE_WAIT))
-             (or (contains? @res2 Events/POKE_MOVE)
-                 (contains? @res2 Events/POKE_WAIT)))))
+    (is (let []
+          (.write ^WSClientConnect @con2
+                  (writeJsonStr (privateEvent<> Events/STARTED {})))
+          (.write ^WSClientConnect @con1
+                  (writeJsonStr (privateEvent<> Events/STARTED {})))
+          (pause 1500)
+          (and (or (contains? @res1 Events/POKE_MOVE)
+                   (contains? @res1 Events/POKE_WAIT))
+               (or (contains? @res2 Events/POKE_MOVE)
+                   (contains? @res2 Events/POKE_WAIT)))))
 
-  (is (let []
-        (pause 2000)
-        (and (or (contains? @res1 Events/GAME_WON)
-             (or (contains? @res2 Events/GAME_WON))))))
+    (is (let []
+          (pause 2000)
+          (and (or (contains? @res1 Events/GAME_WON)
+               (or (contains? @res2 Events/GAME_WON)))))))
 
-  (is (let []
-        (swap! res2 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
-        (swap! res1 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
-        (reset! moves2 m2data)
-        (reset! moves1 m1data)
-        (.write ^WSClientConnect @con1
-                (writeJsonStr (privateEvent<> Events/REPLAY {})))
-        (pause 1500)
-        (and (contains? @res1 Events/RESTART)
-             (contains? @res2 Events/RESTART))))
+  (testing "related to: replay game"
+    (is (let []
+          (swap! res2 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
+          (swap! res1 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
+          (reset! moves2 m2data)
+          (reset! moves1 m1data)
+          (.write ^WSClientConnect @con1
+                  (writeJsonStr (privateEvent<> Events/REPLAY {})))
+          (pause 1500)
+          (and (contains? @res1 Events/RESTART)
+               (contains? @res2 Events/RESTART))))
 
-  (is (let []
-        (.write ^WSClientConnect @con2
-                (writeJsonStr (privateEvent<> Events/STARTED {})))
-        (.write ^WSClientConnect @con1
-                (writeJsonStr (privateEvent<> Events/STARTED {})))
-        (pause 1500)
-        (and (or (contains? @res1 Events/POKE_MOVE)
-                 (contains? @res1 Events/POKE_WAIT))
-             (or (contains? @res2 Events/POKE_MOVE)
-                 (contains? @res2 Events/POKE_WAIT)))))
+    (is (let []
+          (.write ^WSClientConnect @con2
+                  (writeJsonStr (privateEvent<> Events/STARTED {})))
+          (.write ^WSClientConnect @con1
+                  (writeJsonStr (privateEvent<> Events/STARTED {})))
+          (pause 1500)
+          (and (or (contains? @res1 Events/POKE_MOVE)
+                   (contains? @res1 Events/POKE_WAIT))
+               (or (contains? @res2 Events/POKE_MOVE)
+                   (contains? @res2 Events/POKE_WAIT)))))
 
-  (is (let []
-        (pause 2000)
-        (and (or (contains? @res1 Events/GAME_WON)
-                 (contains? @res2 Events/GAME_WON)))))
+    (is (let []
+          (pause 2000)
+          (and (or (contains? @res1 Events/GAME_WON)
+                   (contains? @res2 Events/GAME_WON))))))
+
+  (testing "related to: draw! game"
+    (is (let []
+          (swap! res2 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
+          (swap! res1 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
+          (reset! moves2 m2draw)
+          (reset! moves1 m1draw)
+          (.write ^WSClientConnect @con1
+                  (writeJsonStr (privateEvent<> Events/REPLAY {})))
+          (pause 1500)
+          (and (contains? @res1 Events/RESTART)
+               (contains? @res2 Events/RESTART))))
+
+    (is (let []
+          (.write ^WSClientConnect @con2
+                  (writeJsonStr (privateEvent<> Events/STARTED {})))
+          (.write ^WSClientConnect @con1
+                  (writeJsonStr (privateEvent<> Events/STARTED {})))
+          (pause 1500)
+          (and (or (contains? @res1 Events/POKE_MOVE)
+                   (contains? @res1 Events/POKE_WAIT))
+               (or (contains? @res2 Events/POKE_MOVE)
+                   (contains? @res2 Events/POKE_WAIT)))))
+
+    (is (let []
+          (pause 2000)
+          (and (or (contains? @res1 Events/GAME_TIE)
+                   (contains? @res2 Events/GAME_TIE))))))
+
 
   (is (string? "That's all folks!")))
 

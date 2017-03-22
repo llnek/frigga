@@ -44,6 +44,9 @@
             "run" ["trampoline"
                    "run" "-m" "czlab.wabbit.sys.core"]}
 
+  :test-selectors {:ttt :tictactoe
+                   :pong :pong}
+
   ;;:java-source-paths ["src/main/java"]
   :source-paths ["src/main/clojure"]
   :test-paths ["src/test/clojure"]

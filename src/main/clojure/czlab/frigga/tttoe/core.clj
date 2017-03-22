@@ -205,17 +205,21 @@
         (merge {:grid (vec grid) :status status} data))
 
       (drawGame [this cmd]
+        (log/debug "game to end, no winner!!!")
         (.onStopReset this)
-        (stop! room (.fmtStatus this
-                                {:cmd cmd :combo []} 0)))
+        (bcast! room
+                Events/GAME_TIE
+                (.fmtStatus this
+                            {:cmd cmd :combo []} 0)))
 
       (endGame [this cmd combo]
         (let [^Session pss (:session (.getCur this))
               pnum (.number pss)]
           (log/debug "game to end, winner found! combo = %s" combo)
           (.onStopReset this)
-          (stop! room
-                 (.fmtStatus this {:cmd cmd :combo combo} pnum))))
+          (bcast! room
+                  Events/GAME_WON
+                  (.fmtStatus this {:cmd cmd :combo combo} pnum))))
 
       (toggleActor [this cmd]
         (aset #^"[Ljava.lang.Object;"
