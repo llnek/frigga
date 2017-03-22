@@ -27,7 +27,6 @@
 
   (:import [czlab.loki.game Game Arena]
            [czlab.loki.sys Player Session]
-           [czlab.jasal Muble]
            [czlab.loki.net EventError Events]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -43,16 +42,17 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defprotocol TableAPI
+(defprotocol GameAPI
   ""
-  (registerPlayers [_ p1Wrap p2Wrap])
-  (maybeStartNewPoint [_ winner])
+  (registerPlayers [_ p1 p2])
+  (getPlayer [_ _])
+  (getPlayer2 [_])
+  (getPlayer1 [_])
   (gameOver [_ winner])
   (enqueue [_ evt])
   (postUpdateArena [_])
   (runGameLoop [_ _])
   (pokeAndStartUI [_] )
-  (reposAll [_] )
   (updateArena [_] )
   (syncClients [_] )
   (updatePoint [_ winner] )
@@ -60,24 +60,9 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- reifyPlayer
+(defn- wrapPlayer
   "" [idValue pcolor psession]
   {:value idValue :color pcolor :session psession })
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-(defn- reifyObject "" [x y w h]
-  (muble<> {:x x :y y
-            :vx 0 :vy 0
-            :height h :width w}))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-(defn- reifyPaddle "" [x y w h] (reifyObject x y w h))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-(defn- reifyBall "" [x y w h] (reifyObject x y w h))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -93,92 +78,99 @@
 (defn- rect<>
   "Make a rect with all 4 corners"
 
-  ([obj] (rect<> (:x obj)
-                 (:y obj)
-                 (:width obj)
-                 (:height obj)))
+  ([obj] (rect<> (:x obj) (:y obj) (:width obj) (:height obj)))
 
   ([x y w h]
    (let [h2 (halve h)
          w2 (halve w)]
-     {:left (- x w2)
-      :right (+ x w2)
-      :top (+ y h2)
-      :bottom (- y h2) })))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-(defn- within? "" [op kw o1 o2] (op (kw o1) (kw o2)))
+     {:left (- x w2) :right (+ x w2) :top (+ y h2) :bottom (- y h2) })))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- clamp
+(defn- hhalve "" [obj] [(halve (:height obj)) (halve (:width obj))]
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- oob? "" [op kw o1 o2] (op (kw o1) (kw o2)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- clampPad
   "Ensure paddle does not go out of bound"
   [paddle bbox port?]
 
-  (let [h2 (halve (:height paddle))
-        w2 (halve (:width paddle))
+  (let [[h2 w2] (hhalve paddle)
         rc (rect<> paddle)]
+
     (or (if port?
           (cond
-            (within? < :left rc bbox)
+            (oob? < :left rc bbox)
             (assoc paddle :x (+ (:left bbox) w2))
-            (within? > :right rc bbox)
+            (oob? > :right rc bbox)
             (assoc paddle :x (- (:right bbox) w2)))
           (cond
-            (within? < :bottom rc bbox)
+            (oob? < :bottom rc bbox)
             (assoc paddle :y (+ (:bottom bbox) h2))
-            (within? > :top rc bbox)
+            (oob? > :top rc bbox)
             (assoc paddle :y (- (:top bbox) h2))))
+
         paddle)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; The *enclosure* is the bounding box => the world.
-(defn- traceEnclosure
+(defn- clampBall
   "Check if the ball has just hit a wall"
   [ball dt bbox]
 
-  (let [b (merge ball
+  ;;first move the ball then clamp it
+  (let [{:keys [vx vy] :as b}
+        (merge ball
                  {:y (+ (* dt (:vy ball)) (:y ball))
                   :x (+ (* dt (:vx ball)) (:x ball))})
-        h2 (halve (:height ball))
-        w2 (halve (:width ball))
+        [h2 w2] (hhalve b)
         rc (rect<> b)
         bx (cond
-             (within? < :left rc bbox)
+             (oob? < :left rc bbox)
              (assoc b
-                    :vx (- (:vx ball))
+                    :vx (- vx)
                     :x (+ (:left bbox) w2))
-             (within? > :right rc bbox)
+             (oob? > :right rc bbox)
              (assoc b
-                    :vx (- (:vx ball))
+                    :vx (- vx)
                     :x (- (:right bbox) w2)))
         b (or bx b)
         by (cond
-             (within? < :bottom rc bbox)
+             (oob? < :bottom rc bbox)
              (assoc b
-                    :vy (- (:vy ball))
+                    :vy (- vy)
                     :y (+ (:bottom bbox) h2))
-             (within? > :top rc bbox)
+             (oob? > :top rc bbox)
              (assoc b
-                    :vy (- (:vy ball))
+                    :vy (- vy)
                     :y (- (:top bbox) h2)))
         b (or by b)
         hit? (or (some? bx)(some? by))]
     b))
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- winner? "" [p1 p2 ball bbox]
+(defn- winner? "" [p1 p2 ball bbox port?]
   (let [br (rect<> ball)
         r2 (rect<> p2)
-        r nil
         r1 (rect<> p1)]
-    (cond
-      (> (:bottom br)(:top r)) 1
-      (< (:top br)(:bottom r)) 2
-      :else 0)))
+    (if port?
+      (cond
+        (<= (:bottom ball) (:bottom bbox))
+        (if (> (:bottom r2) (:top r1)) 2 1)
+        (>= (:top ball) (:top bbox))
+        (if (< (:top r2) (:bottom r1)) 2 1)
+        :else 0)
+      (cond
+        (<= (:left ball) (:left bbox))
+        (if (> (:left r2) (:right r1)) 2 1)
+        (>= (:right ball) (:right bbox))
+        (if (< (:right r2) (:left r1)) 2 1)
+        :else 0))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -186,29 +178,30 @@
   "If the ball has collided with a paddle"
   [p1 p2 ball bbox port?]
 
-  (let [hh (halve (:height ball))
-        hw (halve (:width ball))
+  (let [[hh hw] (hhalve ball)
+        {:keys [vx vy]}
+        ball
         br (rect<> ball)
         r2 (rect<> p2)
         r1 (rect<> p1)
-        b2 (when (rectXrect? br r2)
-             (if port?
-               (assoc ball
-                      :vy (- (:vy ball))
-                      :y (- (:bottom r2) hh))
-               (assoc ball
-                      :vx (- (:vx ball))
-                      :x (- (:left r2) hw))))
-        ball (or b2 ball)
-        b1 (when (rectXrect? br r1)
-             (if port?
-               (assoc ball
-                      :vy (- (:vy ball))
-                      :y (+ (:top r1) hh))
-               (assoc ball
-                      :vx (- (.getv ball :vx))
-                      :x (+ (:right r1) hw))))
-        ball (or b1 ball)]
+        b (if (rectXrect? br r2)
+            (if port?
+              (assoc ball
+                     :vy (- vy)
+                     :y (- (:bottom r2) hh))
+              (assoc ball
+                     :vx (- vx)
+                     :x (- (:left r2) hw))))
+        ball (or b ball)
+        b (if (rectXrect? br r1)
+            (if port?
+              (assoc ball
+                     :vy (- vy)
+                     :y (+ (:top r1) hh))
+              (assoc ball
+                     :vx (- vx)
+                     :x (+ (:right r1) hw))))
+        ball (or b ball)]
     ball))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -220,19 +213,19 @@
         paddle {:width 50 :height 12}
         ball {:speed 150 :width 15 :height 15}
         actors (object-array 3)
-        syncMillis 1000
-        impl (muble<>)
+        syncMillis 3000
+        framespersec 60
         portrait? true
         numpts 9
-        scores (atom {})
-        state (atom {})]
+        score (volatile! {})
+        state (volatile! {})]
 
     (reify Game
 
       (init [me _]
         (log/debug "pong: init called()")
-        (let [p1 (reifyPlayer (long \X) "X" (first sessions))
-              p2 (reifyPlayer (long \O) "O" (last sessions))]
+        (let [p1 (wrapPlayer (long \X) "X" (first sessions))
+              p2 (wrapPlayer (long \O) "O" (last sessions))]
           (.registerPlayers me p1 p2)))
 
       (startRound [this cmd]
@@ -241,11 +234,17 @@
 
       (endRound [_ ])
 
-      ;; starts a new game by creating a new arena and players
-      ;; follow by starting the first point.
-      (start [this arg]
-        (log/debug "pong: start called()")
-        (.startRound this {:new? true}))
+      (getPlayer [_ n]
+        (aget #^"[Ljava.lang.Object;" actors n))
+      (getPlayer2 [_] (.getPlayer _ 2))
+      (getPlayer1 [_] (.getPlayer _ 1))
+
+      (start [me arg]
+        (let [c2 (:color (.getPlayer2 me))
+              c1 (:color (.getPlayer1 me))]
+          (log/debug "pong: start called()")
+          (vreset! score {c2 0 c1 0})
+          (.startRound me {:new? true})))
 
       (onEvent [this evt]
         (log/debug "game engine got an update %s" evt)
@@ -255,7 +254,7 @@
                        body " from session " context)
             (.enqueue this evt))))
 
-      TableAPI
+      GameAPI
 
       (registerPlayers [_ p1 p2]
         (aset #^"[Ljava.lang.Object;" actors 2 p2)
@@ -263,58 +262,37 @@
         (log/debug "Player2: %s" p2)
         (log/debug "Player1: %s" p1))
 
-      (gameOver [_ winner]
-        (let [s2 (.getv impl :score2)
-              s1 (.getv impl :score1)
-              src {:winner {:pnum winner
-                            :scores {:ps2 s2 :ps1 s1}}}]
+      (gameOver [this winner]
+        (let [src {:winner (merge @score
+                                  {:pnum winner})}]
           (log/debug "game over: winner is %s" src)
-          (syncArena! room src)
-          (stop! room {})))
+          (.stop this)
+          (bcast! room Events/GAME_WON src)))
 
-      (maybeStartNewPoint [this winner]
-        (let [s2 (.getv impl :score2)
-              s1 (.getv impl :score1)]
-         (syncArena! room
-                     {:scores {:ps2 s2 :ps1 s1 }})
-         ;; skip game loop logic until new point starts
-         (.setv impl :resetting-pt? true)
-         (.startRound this {})))
-
-      (enqueue [_ evt]
-        (let [^Session p2 (:session (.getv impl :p2))
-              ^Session p1 (:session (.getv impl :p1))
-              ^Session pss (:context evt)
-              pnum (.number pss)
+      (enqueue [me evt]
+        (let [^Session p2 (:session (.getPlayer2 me))
+              ^Session p1 (:session (.getPlayer1 me))
+              {:keys [body context]}
+              evt
+              pnum (.number ^Session context)
               kw (if (= pnum 1) :p1 :p2)
               pt (if (= pnum 1) p2 p1)
-              src (:body evt)
-              cmd (readJsonStrKW src)
               ;;pv (* (:dir (kw cmd)) (:speed paddle))
-              pv (:pv (kw cmd))
-              ^Muble
-              other (if (= pnum 2)
-                      (.getv impl :paddle2)
-                      (.getv impl :paddle1))]
-          (if (.getv impl :portrait?)
-            (.setv other :vx pv)
-            (.setv other :vy pv))
-          (syncArena! room cmd pt)))
+              pv (:pv (kw body))
+              dir (if portrait? :vx :vy)
+              which (if (= pnum 2) :paddle2 :paddle1)]
+          (vswap! state
+                  update-in [which] assoc dir pv)
+          (syncArena! room body pt)))
 
       ;;"After update, check if either one of the score has reached the target value, and if so, end the game else pause and loop again"
       (postUpdateArena [this]
-        (let [{:keys [framespersec numpts]}
-              @impl
-              fps (/ 1000 framespersec)
-              s2 (.getv impl :score2)
-              s1 (.getv impl :score1)]
-          (if (and (not (true? (.getv impl :resetting-pt?)))
-                   (or (>= s2 numpts)
-                       (>= s1 numpts)))
+        (let [fps (/ 1000 framespersec)
+              [a b] (vals @score)]
+          (if (and (not (:resetting-pt? @state))
+                   (or (>= b numpts)
+                       (>= a numpts)))
             (do
-              (log/debug "haha score %s vs %s%s"
-                         s2 s1
-                         " :-------------------> game over")
               (.endRound this)
               ;; use this to get out of the while loop
               (trap! Exception "game over."))
@@ -322,19 +300,17 @@
 
       ;;"Spawn a game loop in a separate thread"
       (runGameLoop [this cmd]
-        (let [p2 (:color (.getPlayer2 this))
-              p1 (:color (.getPlayer1 this))]
-          (vswap! state
-                  assoc
-                  :lastTick (now<>)
-                  :lastSync 0
-                  :sync? true
-                  :resetting-pt? false)
-          (when (:new? cmd)
-            (async! #(while true
-                       (try! (.updateArena this))
-                       (.postUpdateArena this))
-                    {:daemon true}))))
+        (vswap! state
+                assoc
+                :lastTick (now<>)
+                :lastSync 0
+                :sync? true
+                :resetting-pt? false)
+        (if (:new? cmd)
+          (async! #(while true
+                     (try! (.updateArena this))
+                     (.postUpdateArena this))
+                  {:daemon true})))
 
       (pokeAndStartUI [me]
         (let [p2 (:color (.getPlayer2 me))
@@ -355,10 +331,10 @@
                         :vx (* (randSign) (:speed ball))
                         :vy (* (randSign) (:speed ball))})]
             (vswap! state assoc :numpts numpts)
-            (vreset! scores
+            (vreset! score
                      (-> (assoc {} (keyword p1) 0)
                          (assoc (keyword p2) 0)))
-          (->> (-> {:ball b :scores @scores}
+          (->> (-> {:ball b :score @score}
                    (assoc (keyword p2) p2)
                    (assoc (keyword p1) p1))
                (bcast! room Events/START_ROUND ))))
@@ -385,18 +361,17 @@
 
       ;;"Update UI with states of local entities"
       (syncClients [this]
-        (let [port? (.getv impl :portrait?)
-              ^Muble pad2 (.getv impl :paddle2)
-              ^Muble pad1 (.getv impl :paddle1)
-              ^Muble ball (.getv impl :ball)
+        (let [pad2 (:paddle2 @state)
+              pad1 (:paddle1 @state)
+              ball (:ball @state)
               src {:p2 {:y (.getv pad2 :y)
                         :x (.getv pad2 :x)
-                        :pv (if port?
+                        :pv (if portrait?
                               (.getv pad2 :vx)
                               (.getv pad2 :vy))}
                    :p1 {:y (.getv pad1 :y)
                         :x (.getv pad1 :x)
-                        :pv (if port?
+                        :pv (if portrait?
                               (.getv pad1 :vx)
                               (.getv pad1 :vy))}
                    :ball {:y (.getv ball :y)
@@ -406,20 +381,21 @@
           (log/debug "sync new BALL values %s" (:ball src))
           (syncArena! room src)))
 
-      ;;"A point has been won. Update the score, and maybe trigger game-over"
-      (updatePoint [this winner]
-        (let [s2 (.getv impl :score2)
-              s1 (.getv impl :score1)
-              nps (:numpts @impl)
-              sx (if (= winner 2) (inc s2) (inc s1))]
-          (log/debug "increment score by 1, %s%s,%s"
-                     "someone lost a point" s1  s2)
-          (.setv impl :sync? false)
-          (if (= winner 2)
-            (.setv impl :score2 sx)
-            (.setv impl :score1 sx))
-          (.maybeStartNewPoint this winner)
-          (when (>= sx nps) (.gameOver this winner))))
+      ;;A point has been won. Update the score, and maybe trigger game-over
+      (updatePoint [me winner]
+        (let [p (.getPlayer me winner)
+              c (:color p)
+              s (get @score c)
+              sx (inc s)]
+          (vswap! state assoc :sync? false)
+          (vswap! score assoc c sx)
+          (log/debug "updated score by 1, new score: %s" @score)
+          (if (>= sx numpts)
+            (.gameOver me winner)
+            (do
+              ;; skip game loop logic until new point starts
+              (vswap! state assoc :resetting-pt? true)
+              (.startRound me {})))))
 
       ;;Move local entities per game loop
       (syncArena [this dt]
@@ -436,9 +412,9 @@
                                    (:y pad2)))
                  (assoc pad1 :y (+ (* dt (:vy pad1))
                                    (:y pad1)))])
-              pad2 (clamp pad2 world portrait?)
-              pad1 (clamp pad1 world portrait?)
-              ball (traceEnclosure ball dt world)
+              pad2 (clampPad pad2 world portrait?)
+              pad1 (clampPad pad1 world portrait?)
+              ball (clampBall ball dt world)
               win (winner? pad1 pad2 ball world)]
           (if (> win 0)
             (.updatePoint this win)
