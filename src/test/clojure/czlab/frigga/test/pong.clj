@@ -33,12 +33,7 @@
 (def ^:private _conf_
   {:locale {:country "US" :lang "en"}
    :games
-   {:tictactoe
-    {:uuid  "bd5f79bbeb414ed5bb442529dc27ed3c"
-     :layout  :portrait :height  480 :width  320
-     :network {:minp 2 :maxp 2
-               :impl :czlab.frigga.tttoe.core/tictactoe }}
-    :pong
+   {:pong
     {:uuid  "fa0860f976dc41358bc7bd5af3147d55"
      :layout :portrait :height  480 :width  320
      :network {:minp 2 :maxp 2
@@ -93,6 +88,7 @@
 (defn- concb [id con info moves res c m]
   (let [{:keys [type code body] :as msg}
         (readJsonStrKW (:text m))]
+    (prn!! "JSON-STR= %s" (:text m))
     (cond
       (= Events/PLAYREQ_OK code)
       (do
@@ -137,13 +133,13 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- wsconn<> "" [cb]
-  (cc/wsconnect<> "localhost" 9090 "/loki/tictactoe" cb))
+  (cc/wsconnect<> "localhost" 9090 "/loki/pong" cb))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- req-game "" [^WSClientConnect c user pwd]
   (->> {:type 3 :code 600
-        :body {:gameid "bd5f79bbeb414ed5bb442529dc27ed3c"
+        :body {:gameid "fa0860f976dc41358bc7bd5af3147d55"
                :principal user
                :credential pwd}}
        writeJsonStr
@@ -182,73 +178,10 @@
                   (writeJsonStr (privateEvent<> Events/STARTED {})))
           (.write ^WSClientConnect @con1
                   (writeJsonStr (privateEvent<> Events/STARTED {})))
-          (pause 1500)
-          (and (or (contains? @res1 Events/POKE_MOVE)
-                   (contains? @res1 Events/POKE_WAIT))
-               (or (contains? @res2 Events/POKE_MOVE)
-                   (contains? @res2 Events/POKE_WAIT)))))
+          (pause 15000)
+          true))
 
-    (is (let []
-          (pause 2000)
-          (and (or (contains? @res1 Events/GAME_WON)
-               (or (contains? @res2 Events/GAME_WON)))))))
-
-  (testing "related to: replay game"
-    (is (let []
-          (swap! res2 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
-          (swap! res1 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
-          (reset! moves2 m2data)
-          (reset! moves1 m1data)
-          (.write ^WSClientConnect @con1
-                  (writeJsonStr (privateEvent<> Events/REPLAY {})))
-          (pause 1500)
-          (and (contains? @res1 Events/RESTART)
-               (contains? @res2 Events/RESTART))))
-
-    (is (let []
-          (.write ^WSClientConnect @con2
-                  (writeJsonStr (privateEvent<> Events/STARTED {})))
-          (.write ^WSClientConnect @con1
-                  (writeJsonStr (privateEvent<> Events/STARTED {})))
-          (pause 1500)
-          (and (or (contains? @res1 Events/POKE_MOVE)
-                   (contains? @res1 Events/POKE_WAIT))
-               (or (contains? @res2 Events/POKE_MOVE)
-                   (contains? @res2 Events/POKE_WAIT)))))
-
-    (is (let []
-          (pause 2000)
-          (and (or (contains? @res1 Events/GAME_WON)
-                   (contains? @res2 Events/GAME_WON))))))
-
-  (testing "related to: draw! game"
-    (is (let []
-          (swap! res2 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
-          (swap! res1 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
-          (reset! moves2 m2draw)
-          (reset! moves1 m1draw)
-          (.write ^WSClientConnect @con1
-                  (writeJsonStr (privateEvent<> Events/REPLAY {})))
-          (pause 1500)
-          (and (contains? @res1 Events/RESTART)
-               (contains? @res2 Events/RESTART))))
-
-    (is (let []
-          (.write ^WSClientConnect @con2
-                  (writeJsonStr (privateEvent<> Events/STARTED {})))
-          (.write ^WSClientConnect @con1
-                  (writeJsonStr (privateEvent<> Events/STARTED {})))
-          (pause 1500)
-          (and (or (contains? @res1 Events/POKE_MOVE)
-                   (contains? @res1 Events/POKE_WAIT))
-               (or (contains? @res2 Events/POKE_MOVE)
-                   (contains? @res2 Events/POKE_WAIT)))))
-
-    (is (let []
-          (pause 2000)
-          (and (or (contains? @res1 Events/GAME_TIE)
-                   (contains? @res2 Events/GAME_TIE))))))
-
+    )
 
   (is (string? "That's all folks!")))
 

@@ -114,11 +114,8 @@
       Game
 
       (playerGist [me id]
-        (some #(let [s (:session %)]
-                 (if (= id
-                        (.. ^Session
-                            s
-                            player id))
+        (some #(let [^Session s (:session %)]
+                 (if (= id (.. s player id))
                    (dissoc % :session))) (drop 1 actors)))
 
       (startRound [_ _])
