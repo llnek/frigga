@@ -243,7 +243,7 @@
 
   (let [world {:port? true :height 480 :width 320
                :top 479 :bottom 0 :right 319 :left 0}
-        ball {:speed 150 :vx 0 :vy 0 :width 15 :height 15}
+        ball {:speed 15 :vx 0 :vy 0 :width 15 :height 15}
         paddle {:width 50 :height 12 :vx 0 :vy 0}
         framespersec (getFrames sessions)
         fps (/ 1000 framespersec)
@@ -320,12 +320,9 @@
 
       (postUpdateArena [this]
         (let [[a b] (vals @score)]
-          (if (and (not (:resetting-pt? @state))
-                   (or (>= b numpts)
-                       (>= a numpts)))
-            (do
-              (.endRound this)
-              (trap! Exception "loop breaker"))
+          (if (or (>= b numpts)
+                  (>= a numpts))
+            (trap! Exception "loop breaker")
             (try! (Thread/sleep fps)))))
 
       (runGameLoop [this cmd]

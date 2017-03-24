@@ -121,6 +121,9 @@
         (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" 0)
         (swap! res conj Events/GAME_TIE))
 
+      (= Events/SYNC_ARENA code)
+      (do
+        (swap! res conj code))
 
       (= Events/POKE_WAIT code)
       (do
