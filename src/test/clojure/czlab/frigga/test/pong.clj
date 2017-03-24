@@ -11,7 +11,8 @@
 
   czlab.frigga.test.pong
 
-  (:require [czlab.convoy.nettio.client :as cc])
+  (:require [czlab.convoy.nettio.client :as cc]
+            [czlab.basal.logging :as log])
 
   (:import [czlab.convoy.nettio WSClientConnect]
            [czlab.loki.net Events])
@@ -80,15 +81,15 @@
     (when c
       (->> {:value value :cell c}
            (privateEvent<> Events/PLAY_MOVE )
-           writeJsonStr
+           encodeEventAsJson
            (.write ^WSClientConnect @con)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- concb [id con info moves res c m]
   (let [{:keys [type code body] :as msg}
-        (readJsonStrKW (:text m))]
-    (prn!! "JSON-STR= %s" (:text m))
+        (decodeEvent (:text m))]
+    (log/debug "[JSON-STR]\n%s\n" (prettyEvent msg))
     (cond
       (= Events/PLAYREQ_OK code)
       (do
@@ -112,12 +113,12 @@
 
       (= Events/GAME_WON code)
       (let [s (:status body)]
-        (prn!! "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" s)
+        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" s)
         (swap! res conj Events/GAME_WON))
 
       (= Events/GAME_TIE code)
       (let [s (:status body)]
-        (prn!! "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" 0)
+        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" 0)
         (swap! res conj Events/GAME_TIE))
 
 
@@ -138,11 +139,11 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- req-game "" [^WSClientConnect c user pwd]
-  (->> {:type 3 :code 600
+  (->> {:type Events/PRIVATE :code Events/PLAYGAME_REQ
         :body {:gameid "fa0860f976dc41358bc7bd5af3147d55"
                :principal user
                :credential pwd}}
-       writeJsonStr
+       encodeEventAsJson
        (.write c )))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -175,9 +176,9 @@
 
     (is (let []
           (.write ^WSClientConnect @con2
-                  (writeJsonStr (privateEvent<> Events/STARTED {})))
+                  (encodeEventAsJson (privateEvent<> Events/STARTED {})))
           (.write ^WSClientConnect @con1
-                  (writeJsonStr (privateEvent<> Events/STARTED {})))
+                  (encodeEventAsJson (privateEvent<> Events/STARTED {})))
           (pause 15000)
           true))
 

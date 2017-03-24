@@ -123,8 +123,8 @@
 
       (init [me _]
         (log/debug "tictactoe: init called()")
-        (let [p1 (reifyPlayer (long \X) "X" (first sessions))
-              p2 (reifyPlayer (long \O) "O" (last sessions))]
+        (let [p1 (reifyPlayer (long \X) :X (first sessions))
+              p2 (reifyPlayer (long \O) :O (last sessions))]
           (.registerPlayers me p1 p2)))
 
       (start [me _]
