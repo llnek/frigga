@@ -20,6 +20,7 @@
   (:require [czlab.basal.logging :as log])
 
   (:use [czlab.loki.net.core]
+        [czlab.loki.sys.util]
         [czlab.basal.process]
         [czlab.basal.format]
         [czlab.basal.core]
@@ -28,6 +29,8 @@
   (:import [czlab.loki.game Game Arena]
            [czlab.loki.sys Player Session]
            [czlab.loki.net EventError Events]))
+
+(Math/sin (deg->rad 45))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;(set! *warn-on-reflection* true)
@@ -135,6 +138,7 @@
 (defn- syncBall
   "Move and clamp" [ball bbox dt]
 
+  ;;(let [ball (moveObject! ball dt)
   (let [{:keys [vx vy] :as b}
         (merge ball
                {:y (+ (:y ball) (* dt (:vy ball)))
@@ -236,20 +240,38 @@
               (conj! %1 framespersec) %1)) sessions)
        (apply min 60)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- ctorWorld ""
+  ([w h] (ctorWorld 0 0 w h))
+  ([x y w h]
+   {:top (- h y 1) :right (- w x 1)
+    :left x :bottom y
+    :width w  :height h :port? (> h w)} ))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- ctorObj ""
+  ([box w h] (ctorObj box w h 0))
+  ([box w h s]
+   (merge
+     {:speed s :theta 0}
+     (if (:port? box)
+       {:width w :height h} {:width h :height w}))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn pong
   "" ^Game [^Arena room sessions]
 
-  (let [world {:port? true :height 480 :width 320
-               :top 479 :bottom 0 :right 319 :left 0}
-        ball {:speed 15 :vx 0 :vy 0 :width 15 :height 15}
-        paddle {:width 50 :height 12 :vx 0 :vy 0}
-        framespersec (getFrames sessions)
-        fps (/ 1000 framespersec)
+  (let [framespersec (getFrames sessions)
+        tick (/ 1000 framespersec)
+        syncMillis 2000
+        numpts 5
+        world (ctorWorld 320 480)
+        ball (ctorObj world 15 15 100)
+        paddle (ctorObj world 50 12)
         actors (object-array 3)
-        syncMillis 3000
-        numpts 9
         score (volatile! {})
         state (volatile! {})]
 
@@ -320,22 +342,23 @@
 
       (postUpdateArena [this]
         (let [[a b] (vals @score)]
+          ;;someone has won, get out
           (if (or (>= b numpts)
                   (>= a numpts))
             (trap! Exception "loop breaker")
-            (try! (Thread/sleep fps)))))
+            (try! (Thread/sleep tick)))))
 
       (runGameLoop [this cmd]
         (vswap! state
                 assoc
                 :lastTick (now<>)
                 :lastSync 0
-                :sync? true
                 :resetting-pt? false)
         (if (:new? cmd)
-          (async! #(while true
-                     (try! (.updateArena this))
-                     (.postUpdateArena this))
+          (async! #(try!
+                     (while true
+                        (try! (.updateArena this))
+                        (.postUpdateArena this)))
                   {:daemon true})))
 
       (pokeAndStartUI [me]
@@ -364,7 +387,7 @@
                       :lastSync lastSync2)
               ;; --- check if time to send a ball update
               (when (> lastSync syncMillis)
-                (if (:sync? @state) (.syncClients this))
+                (.syncClients this)
                 (vswap! state assoc :lastSync 0))))))
 
       ;;Update UI with states of local entities
@@ -382,7 +405,6 @@
               sx (inc (@score c))]
           (vswap! state
                   assoc
-                  :sync? false
                   :resetting-pt? true)
           (vswap! score assoc c sx)
           (log/debug "updated score by 1, new score: %s" @score)
@@ -394,9 +416,9 @@
       (syncTick [me dt]
         (let [c2 (.playerXXX me 2 :color)
               c1 (.playerXXX me 1 :color)
-              ball (syncBall (:ball @state) world dt)
               pad2 (syncPad (c2 @state) world dt)
               pad1 (syncPad (c1 @state) world dt)
+              ball (syncBall (:ball @state) world dt)
               win (winner? pad1 pad2 ball world)]
           (if (> win 0)
             (.updatePoint me win)
