@@ -30,14 +30,16 @@
            [czlab.loki.sys Player Session]
            [czlab.loki.net EventError Events]))
 
-(Math/sin (deg->rad 45))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;(set! *warn-on-reflection* true)
 
-;; 150px/sec
-;;(def ^:private INITIAL_BALL_SPEED 150)
-;;(def ^:private BALL_SPEEDUP 25) ;; pixels / sec
+(def ^:private _270_ (* 1.5 Math/PI))
+(def ^:private _360_ (* 2 Math/PI))
+(def ^:private _180_ Math/PI)
+(def ^:private _90_ (/ 2 Math/PI))
+(def ^:private _paddle-speed_ 65)
+(def ^:private _ball-speed_ 100)
+(def ^:private _ball-acc_ 16)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -72,24 +74,32 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- rectXrect?
-  "If 2 rects intersect" [ra rb]
-  (not (or (< (:right ra) (:left rb))
-           (< (:right rb) (:left ra))
-           (< (:top ra) (:bottom rb))
-           (< (:top rb) (:bottom ra)))))
+  "If 2 rects intersect" [ra rb bbox]
+  (if (:opengl? bbox)
+    (not (or (< (:right ra) (:left rb))
+             (< (:right rb) (:left ra))
+             (< (:top ra) (:bottom rb))
+             (< (:top rb) (:bottom ra))))
+    (not (or (< (:right ra) (:left rb))
+             (< (:right rb) (:left ra))
+             (> (:top ra) (:bottom rb))
+             (> (:top rb) (:bottom ra))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- rect<>
   "Make a rect with all 4 corners"
 
-  ([obj] (rect<> (:x obj) (:y obj) (:width obj) (:height obj)))
+  ([obj bbox] (rect<> (:x obj) (:y obj)
+                      (:width obj) (:height obj) bbox))
 
-  ([x y w h]
+  ([x y w h bbox]
    (let [h2 (halve h)
          w2 (halve w)]
-     {:left (- x w2) :right (+ x w2)
-      :top (+ y h2) :bottom (- y h2) })))
+     (merge {:left (- x w2) :right (+ x w2)}
+            (if (:opengl? bbox)
+              {:top (+ y h2) :bottom (- y h2)}
+              {:top (- y h2) :bottom (+ y h2)})))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -113,11 +123,13 @@
 (defn- syncPad
   "Move and clamp" [pad world dt]
 
-  (let [pad (update-in pad
-                       [(axis world)]
-                       + (* dt ((velo world) pad)))
+  (let [dp (* dt (:speed pad) (:theta pad))
+        [k op] (if (:port? world)
+                 [:x +]
+                 (if (:opengl? world) [:y +] [:y -]))
+        pad (update-in pad k op dp)
         [h2 w2] (hhalve pad)
-        r (rect<> pad)]
+        r (rect<> pad world)]
     (or (if (:port? world)
           (some->> (cond
                      (oob? > :right r world)
@@ -125,26 +137,61 @@
                      (oob? < :left r world)
                      (+ (:left world) w2))
                    (assoc pad :x))
-          (some->> (cond
-                     (oob? < :bottom r world)
-                     (+ (:bottom world) h2)
-                     (oob? > :top r world)
-                     (- (:top world) h2))
-                   (assoc pad :y)))
+          (if (:opengl? world)
+            (some->> (cond
+                       (oob? < :bottom r world)
+                       (+ (:bottom world) h2)
+                       (oob? > :top r world)
+                       (- (:top world) h2))
+                     (assoc pad :y))
+            (some->> (cond
+                       (oob? > :bottom r world)
+                       (- (:bottom world) h2)
+                       (oob? < :top r world)
+                       (+ (:top world) h2))
+                     (assoc pad :y))))
         pad)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- winner? "" [p1 p2 ball bbox]
+  (let [br (rect<> ball bbox)
+        r2 (rect<> p2 bbox)
+        r1 (rect<> p1 bbox)]
+    (if (:port? bbox)
+      (if (:opengl? bbox)
+        (cond
+          (<= (:bottom br) (:bottom bbox))
+          (if (> (:bottom r2) (:top r1)) 2 1)
+          (>= (:top br) (:top bbox))
+          (if (< (:top r2) (:bottom r1)) 2 1)
+          :else 0)
+        (cond
+          (>= (:bottom br) (:bottom bbox))
+          (if (< (:bottom r2) (:top r1)) 2 1)
+          (<= (:top br) (:top bbox))
+          (if (> (:top r2) (:bottom r1)) 2 1)
+          :else 0))
+      (cond
+        (<= (:left br) (:left bbox))
+        (if (> (:left r2) (:right r1)) 2 1)
+        (>= (:right br) (:right bbox))
+        (if (< (:right r2) (:left r1)) 2 1)
+        :else 0))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- bounce! "" [ball axis]
+  (assoc ball
+         :theta
+         (mod (+ (- (* 2 axis) (:theta ball)) _360_) _360_)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- syncBall
   "Move and clamp" [ball bbox dt]
 
-  ;;(let [ball (moveObject! ball dt)
-  (let [{:keys [vx vy] :as b}
-        (merge ball
-               {:y (+ (:y ball) (* dt (:vy ball)))
-                :x (+ (:x ball) (* dt (:vx ball)))})
-        [h2 w2] (hhalve b)
-        r (rect<> b)
+  (let [r nil w2 nil h2 nil vx 0 vy 0 b nil
         bx (some->> (cond
                       (oob? < :left r bbox)
                       (+ (:left bbox) w2)
@@ -162,49 +209,36 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- winner? "" [p1 p2 ball bbox]
-  (let [br (rect<> ball)
-        r2 (rect<> p2)
-        r1 (rect<> p1)]
-    (if (:port? bbox)
-      (cond
-        (<= (:bottom br) (:bottom bbox))
-        (if (> (:bottom r2) (:top r1)) 2 1)
-        (>= (:top br) (:top bbox))
-        (if (< (:top r2) (:bottom r1)) 2 1)
-        :else 0)
-      (cond
-        (<= (:left br) (:left bbox))
-        (if (> (:left r2) (:right r1)) 2 1)
-        (>= (:right br) (:right bbox))
-        (if (< (:right r2) (:left r1)) 2 1)
-        :else 0))))
+(defn- traceBall
+  "" [p1 p2 ball bbox]
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-(defn- collide?
-  "If the ball has collided with a paddle"
-  [p1 p2 ball bbox]
-
-  (let [[hh hw] (hhalve ball)
-        {:keys [vx vy]}
-        ball
-        br (rect<> ball)
-        r2 (rect<> p2)
-        r1 (rect<> p1)
-        [bot top] (ppos r2 r1 bbox)
-        b (if (rectXrect? br top)
-            (->> (if (:port? bbox)
-                     [:vy (- vy) :y (- (:bottom top) hh)]
-                     [:vx (- vx) :x (- (:right top) hw)])
-                 (apply assoc ball )))
-        ball (or b ball)
-        b (if (rectXrect? br bot)
-            (->> (if (:port? bbox)
-                   [:vy (- vy) :y (+ (:top bot) hh)]
-                   [:vx (- vx) :x (+ (:left r1) hw)])
-                 (apply assoc ball )))]
-    (or b ball)))
+  (let [[b2h b2w] (hhalve ball)
+        br (rect<> ball bbox)
+        r2 (rect<> p2 bbox)
+        r1 (rect<> p1 bbox)
+        theta (:theta ball)
+        s (:speed ball)
+        [top bot]
+        (if (:port?)
+          (if (:opengl? bbox)
+            (if (> (:y p2) (:y p1)) r2 r1)
+            (if (< (:y p2) (:y p1)) r2 r1))
+          (if (> (:x p2) (:x p1)) r2 r1))]
+    (cond
+      (rectXrect? br top bbox)
+      (-> (if (:port? bbox)
+            (-> (bounce! ball (if (> theta _90_) _180_ _360_))
+                (assoc :y ((if (:opengl? bbox) - +) (:bottom top) b2h)))
+            (-> (bounce! ball (if (> theta _270_) _270_ _90_))
+                (assoc :x (- (:left top) b2w))))
+          (assoc :speed (+ s _ball-acc_)))
+      (rectXrect? br bot bbox)
+      (-> (if (:port? bbox)
+            (-> (bounce! ball (if (> theta _270_) _360_ _180_))
+                (assoc :y ((if (:opengl? bbox) + -) (:top bot) b2h)))
+            (-> (bounce! ball (if (> theta _180_) _270_ _90_))
+                (assoc :x (+ (:right bot) b2w))))
+          (assoc :speed (+ s _ball-acc_))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -243,11 +277,14 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- ctorWorld ""
-  ([w h] (ctorWorld 0 0 w h))
-  ([x y w h]
-   {:top (- h y 1) :right (- w x 1)
-    :left x :bottom y
-    :width w  :height h :port? (> h w)} ))
+  ([w h] (ctorWorld 0 0 w h true))
+  ([x y w h openGL?]
+   (merge {:left x :right (- w x 1)}
+          (if openGL?
+            {:bottom y :top (- h y 1)}
+            {:top y :bottom (- h y 1)})
+          {:width w :height h
+           :opengl? openGL? :port? (> h w)} )))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -255,7 +292,7 @@
   ([box w h] (ctorObj box w h 0))
   ([box w h s]
    (merge
-     {:speed s :theta 0}
+     {:speed s :theta 0 :x 0 :y 0}
      (if (:port? box)
        {:width w :height h} {:width h :height w}))))
 
@@ -269,8 +306,8 @@
         syncMillis 2000
         numpts 5
         world (ctorWorld 320 480)
-        ball (ctorObj world 15 15 100)
-        paddle (ctorObj world 50 12)
+        ball (ctorObj world 15 15 _ball-speed_)
+        paddle (ctorObj world 50 12 _paddle-speed_)
         actors (object-array 3)
         score (volatile! {})
         state (volatile! {})]
@@ -418,15 +455,16 @@
               c1 (.playerXXX me 1 :color)
               pad2 (syncPad (c2 @state) world dt)
               pad1 (syncPad (c1 @state) world dt)
-              ball (syncBall (:ball @state) world dt)
-              win (winner? pad1 pad2 ball world)]
-          (if (> win 0)
+              _ (vswap! state assoc c2 pad2 c1 pad1)
+              ball (moveObject! (:ball @state)
+                                dt (:opengl? world))
+              win (winner? pad1 pad2 ball world)
+              ball
+              (if-not (spos? win)
+                (traceBall pad1 pad2 ball world) ball)]
+          (if (spos? win)
             (.updatePoint me win)
-            (vswap! state
-                    assoc
-                    :ball (collide? pad1 pad2 ball world)
-                    c2 pad2
-                    c1 pad1)))))))
+            (vswap! state assoc :ball ball)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;EOF
