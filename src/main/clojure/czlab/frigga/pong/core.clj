@@ -34,19 +34,17 @@
 ;;(set! *warn-on-reflection* true)
 
 (def ^:private _270_ (* 1.5 Math/PI))
-(def ^:private _360_ (* 2 Math/PI))
-(def ^:private _180_ Math/PI)
-(def ^:private _90_ (/ 2 _180_))
-(def ^:private _45_ (/ 4 _180_))
+(def ^:private _3pi_ (* 3 Math/PI))
+(def ^:private _2pi_ (* 2 Math/PI))
+(def ^:private _pi_ Math/PI)
+(def ^:private _90_ (/ 2 _pi_))
+(def ^:private _45_ (/ 4 _pi_))
 (def ^:private _paddle-speed_ 65)
 (def ^:private _ball-speed_ 100)
 (def ^:private _ball-acc_ 16)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defmacro ^:private velo "" [world] `(if (:port? ~world) :vx :vy))
-(defmacro ^:private axis "" [world] `(if (:port? ~world) :x :y))
-(defmacro ^:private bspeed "" [b] `(* (randSign)(:speed ~b)))
 (defmacro ^:private halve [v] `(* ~v 0.5))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -97,13 +95,15 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defmacro ^:private bbox<> "" [world {:keys [x y width height]}]
-  `(rect<> ~world ~x ~y ~width ~height ))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
 (defmulti ^:private rect<>
   "Make a rect with all 4 corners" (fn [w _ _ _ _] (:opengl? w)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- bbox<>
+  "" [world {:keys [x y
+                    width height]}]
+  (rect<> world x y width height))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -133,15 +133,6 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- ppos "" [r2 r1 world]
-  (if (:port? world)
-    (if (> (:bottom r2)
-           (:bottom r1)) [r1 r2] [r2 r1])
-    (if (> (:right r2)
-           (:right r1)) [r1 r2] [r2 r1])))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
 (defmulti ^:private syncPad
   "Move and clamp" (fn [w _ _] (:layout w)))
 
@@ -150,10 +141,9 @@
 (defmethod syncPad :portrait [world pad dt]
 
   (let [dp (* dt (:speed pad) (:theta pad))
-        pad (update-in pad :x + dp)
+        pad (update-in pad [:x] + dp)
         [h2 w2] (hhalve pad)
         r (bbox<> world pad)]
-
     (or (some->> (cond
                    (oob? > :right r world)
                    (- (:right world) w2)
@@ -170,12 +160,10 @@
         world
         dp (* dt (:speed pad) (:theta pad))
         [h2 w2] (hhalve pad)
-        pad
-        (if opengl?
-          (assoc pad :y + dp)
-          (assoc pad :y - dp))
+        pad (if opengl?
+              (assoc pad :y + dp)
+              (assoc pad :y - dp))
         r (bbox<> world pad)]
-
     (or (if opengl?
           (some->> (cond
                      (oob? < :bottom r world)
@@ -193,170 +181,179 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defmulti ^:private winner? "" (fn [world _ _ _] (:layout world)))
+(defmulti ^:private winner?? "" (fn [world _ _ _] (:layout world)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defmethod winner? :portrait [world p1 p2 ball]
+(defmethod winner?? :portrait [world p1 p2 ball]
 
-  (let [{:keys [top bottom left right opengl?]}
-        world
-        br (bbox<> world ball)]
+  (let [{:keys [opengl?]} world
+        {:keys [x y]} ball
+        r2 (bbox<> world p2)
+        r1 (bbox<> world p1)]
     (if opengl?
       (cond
-        (< (:y br) (:y p1)) 2
-        (> (:y br) (:y p2)) 1
+        (< y (:bottom r1)) 2
+        (> y (:top r2)) 1
         :else 0)
       (cond
-        (> (:y br) (:y p2)) 1
-        (< (:y br) (:y p1)) 2
+        (> y (:bottom r2)) 1
+        (< y (:top r1)) 2
         :else 0))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defmethod winner? :landscape [world p1 p2 ball]
+(defmethod winner?? :landscape [world p1 p2 ball]
 
-  (let [{:keys [top bottom left right opengl?]}
-        world
-        br (bbox<> world ball)]
-
+  (let [r2 (bbox<> world p2)
+        r1 (bbox<> world p1)
+        {:keys [x y]} ball]
     (cond
-      (< (:x br) (:x p1)) 2
-      (> (:x br) (:x p2)) 1
+      (< x (:left r1)) 2
+      (> x (:right r2)) 1
       :else 0)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-(defn- bounce! "" [ball axis]
-  (assoc ball
-         :theta
-         (mod (+ (- (* 2 axis) (:theta ball)) _360_) _360_)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-(defmulti ^:private syncBall "Move and clamp" (fn [world _] (:layout world)))
-
 ;;top, bottom = 2pi - t
 ;;side - going up = pi - t else 3pi - t
+(defn- bounce! "" [ball axis]
+  (let [{:keys [theta]} ball
+        t (case axis
+            :right
+            (cond
+              (and (> theta 0) (< theta _90_))
+              (- _pi_ theta)
+              (and (> theta _270_) (< theta _2pi_))
+              (- _3pi_ theta))
+            :left
+            (cond
+              (and (> theta _90_) (< theta _pi_))
+              (- _pi_ theta)
+              (and (> theta _pi_) (< theta _270_))
+              (- _3pi_ theta))
+            ;;(:bottom :top)
+            (- _2pi_ theta))]
+    (if (some? t)
+      (-> (update-in ball [:speed] + _ball-acc_)
+          (assoc :theta t))
+      ball)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defmethod syncBall :portrait [world ball]
-
-  (let [{:keys [theta]} ball]
-    ;;top
-    (cond
-      (and (>= theta _90_)
-           (<= theta _180_))
-      (- _360_ theta)
-      (and (>= theta 0)
-           (<= theta _90_))
-      (- _360_ theta)
-      :else theta)
-
-  (let [r nil w2 nil h2 nil vx 0 vy 0 b nil
-        bx (some->> (cond
-                      (oob? < :left r bbox)
-                      (+ (:left bbox) w2)
-                      (oob? > :right r bbox)
-                      (- (:right bbox) w2))
-                    (assoc b :vx (- vx) :x))
-        b (or bx b)
-        by (some->> (cond
-                      (oob? < :bottom r bbox)
-                      (+ (:bottom bbox) h2)
-                      (oob? > :top r bbox)
-                      (- (:top bbox) h2))
-                    (assoc b :vy (- vy) :y))]
-    (or by b)))
+(defmulti ^:private hitWall?? "" (fn [world _] (:layout world)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defmethod syncBall :landscape [world ball]
-
-  (let [r nil w2 nil h2 nil vx 0 vy 0 b nil
-        bx (some->> (cond
-                      (oob? < :left r bbox)
-                      (+ (:left bbox) w2)
-                      (oob? > :right r bbox)
-                      (- (:right bbox) w2))
-                    (assoc b :vx (- vx) :x))
-        b (or bx b)
-        by (some->> (cond
-                      (oob? < :bottom r bbox)
-                      (+ (:bottom bbox) h2)
-                      (oob? > :top r bbox)
-                      (- (:top bbox) h2))
-                    (assoc b :vy (- vy) :y))]
-    (or by b)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-(defmulti ^:private traceBall "" (fn [world _ _ _] (:layout world)))
+(defmethod hitWall?? :portrait [world ball]
+  ;;check side walls
+  (let [{:keys [left right opengl?]}
+        world
+        [_ w2] (hhalve ball)
+        b (bbox<> world ball)
+        [axis x']
+        (cond
+          (oob? < :left b world)
+          [:left (+ left w2)]
+          (oob? > :right b world)
+          [:right (- right w2)])]
+    (if (some? axis)
+      (-> (assoc ball :x x')
+          (bounce! axis))
+      ball)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defmethod traceBall :portrait [world p1 p2 ball]
+(defmethod hitWall?? :landscape [world ball]
+  ;;check top bottom walls
+  (let [{:keys [bottom top opengl?]}
+        world
+        [h2 _] (hhalve ball)
+        b (bbox<> world ball)
+        [axis y']
+        (if opengl?
+          (cond
+            (oob? < :bottom b world)
+            [:bottom (+ bottom  h2)]
+            (oob? > :top b world)
+            [:top (- top h2)])
+          (cond
+            (oob? > :bottom b world)
+            [:bottom (- bottom  h2)]
+            (oob? < :top b world)
+            [:top (+ top h2)]))]
+    (if (some? axis)
+      (-> (assoc ball :y y')
+          (bounce! axis))
+      ball)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defmulti ^:private hitPad?? "" (fn [world _ _ _] (:layout world)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defmethod hitPad?? :portrait [world p1 p2 ball]
 
   (let [{:keys [opengl?]} world
         [b2h _] (hhalve ball)
         br (bbox<> world ball)
         r2 (bbox<> world p2)
-        r1 (bbox<> world p1)]
-    (cond
-      (rectXrect? world br r2)
-      (if opengl?
-        (-> (assoc ball :y (- (:bottom r2) b2h))
-            (bounce! 0))
-        (-> (assoc ball :y (- (:top r2) b2h))
-            (bounce! 0)))
-      (rectXrect? world br r1)
-      (if opengl?
-        (-> (assoc ball :y (+ (:top r1) b2h))
-            (bounce! 0))
-        (-> (assoc ball :y (- (:bottom r1) b2h))
-            (bounce! 0)))
-      :else
-      (syncBall world ball))))
+        r1 (bbox<> world p1)
+        [axis y']
+        (cond
+          (rectXrect? world br r2)
+          (if opengl?
+            [:top (- (:bottom r2) b2h)]
+            [:bottom (- (:top r2) b2h)])
+          (rectXrect? world br r1)
+          (if opengl?
+            [:bottom (+ (:top r1) b2h)]
+            [:top (+ (:bottom r1) b2h)]))]
+    (if (some? axis)
+      (-> (assoc ball :y y')
+          (bounce! axis))
+      (hitWall?? world ball))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defmethod traceBall :landscape [world p1 p2 ball]
+(defmethod hitPad?? :landscape [world p1 p2 ball]
 
   (let [[_ b2w] (hhalve ball)
         br (bbox<> world ball)
         r2 (bbox<> world p2)
-        r1 (bbox<> world p1)]
-    (cond
-      (rectXrect? world br r2)
-      (-> (assoc ball :x (- (:left r2) b2w))
-          (bounce! 0))
-      (rectXrect? world br r1)
-      (-> (assoc ball :x (+ (:right r1) b2w))
-          (bounce! 0))
-      :else
-      (syncBall world ball))))
+        r1 (bbox<> world p1)
+        [axis x']
+        (cond
+          (rectXrect? world br r2)
+          [:right (- (:left r2) b2w)]
+          (rectXrect? world br r1)
+          [:left (+ (:right r1) b2w)])]
+    (if (some? axis)
+      (-> (assoc ball :x x')
+          (bounce! axis))
+      (hitWall?? world ball))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defmulti ^:private cfgBall "" (fn [_ w] (:layout w)))
+(defmulti ^:private cfgBall "" (fn [w _] (:layout w)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defmethod cfgBall :portrait [ball world]
-  (let [{:keys [x y opengl?]} world]
+(defmethod cfgBall :portrait [world ball]
+  (let [{:keys [x y opengl?]} world
+        r (* (Math/random) _90_)]
     ;;calc random angle 45 < t < 135 or 225 < t < 315
     (merge ball
            {:x x :y y}
            (if (spos? (randSign))
-             {:theta (+ (* (Math/random) _90_) _45_)}
-             {:theta (+ (* (Math/random) _90_) _180_ _45_)}))))
+             {:theta (+ r _45_)}
+             {:theta (+ r _pi_ _45_)}))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defmethod cfgBall :landscape [ball world]
+(defmethod cfgBall :landscape [world ball]
   (let [{:keys [x y opengl?]} world
-        ;;calc random angle 45 < t < 315 or 135 < t < 225
+        ;;calc random angle 45 > t > 315 or 135 < t < 225
         r (* (Math/random) _90_)
         {:keys [theta] :as b}
         (merge ball
@@ -364,17 +361,17 @@
                (if (spos? (randSign))
                  {:theta (+ r _90_ _45_)}
                  {:theta (+ r _270_ _45_)}))]
-    (if (> theta _360_)
-      (assoc b :theta (- theta _360_)) b)))
+    (if (> theta _2pi_)
+      (assoc b :theta (- theta _2pi_)) b)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defmulti ^:private cfgPads
-  "[p1 p2] p1 is always closest to origin" (fn [_ w] (:layout w)))
+  "[p1 p2] p1 is always closest to origin" (fn [w _] (:layout w)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defmethod cfgPads :portrait [paddle world]
+(defmethod cfgPads :portrait [world paddle]
   (let [[hp wp] (hhalve paddle)
         {:keys [x y opengl?]} world]
     (mapv #(merge paddle %)
@@ -386,7 +383,7 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defmethod cfgPads :landscape [paddle world]
+(defmethod cfgPads :landscape [world paddle]
   (let [[hp wp] (hhalve paddle)
         {:keys [x y opengl?]} world]
     (mapv #(merge paddle %)
@@ -421,15 +418,21 @@
               {:y (+ (:bottom c) (halve h))}
               {:y (+ (:top c) (halve h))})))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defmulti ^:private ctorObj "" (fn [w _ _ _] (:layout w)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- ctorObj ""
-  ([box w h] (ctorObj box w h 0))
-  ([box w h s]
-   (merge
-     {:speed s :theta 0 :x 0 :y 0}
-     (if (:port? box)
-       {:width w :height h} {:width h :height w}))))
+(defmethod ctorObj :portrait [box w h s]
+  (doto
+    {:speed s :theta 0 :x 0 :y 0 :width w :height h}))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defmethod ctorObj :landscape [box w h s]
+  (doto
+    {:speed s :theta 0 :x 0 :y 0 :width h :height w}))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -507,9 +510,10 @@
               p1 (.player me 1)
               kw (:color (if (= pnum 1) p1 p2))
               st (:session (if (= pnum 1) p2 p1))
-              pv (:pv (kw body))]
+              pv (:pv (kw body))
+              sign (numSign pv)]
           (vswap! state
-                  update-in [kw] assoc (velo world) pv)
+                  update-in [kw] assoc :theta sign)
           (syncArena! room body st)))
 
       (postUpdateArena [this]
@@ -534,8 +538,8 @@
                   {:daemon true})))
 
       (pokeAndStartUI [me]
-        (let [[p2 p1] (cfgPads paddle ball world)
-              b (cfgBall ball world)
+        (let [[p1 p2] (cfgPads world paddle)
+              b (cfgBall world ball)
               c2 (.playerXXX me 2 :color)
               c1 (.playerXXX me 1 :color)]
           (vreset! state {c2 p2 c1 p1 :ball b})
@@ -588,15 +592,15 @@
       (syncTick [me dt]
         (let [c2 (.playerXXX me 2 :color)
               c1 (.playerXXX me 1 :color)
-              pad2 (syncPad (c2 @state) world dt)
-              pad1 (syncPad (c1 @state) world dt)
+              pad2 (syncPad world (c2 @state) dt)
+              pad1 (syncPad world (c1 @state) dt)
               _ (vswap! state assoc c2 pad2 c1 pad1)
               ball (moveObject! (:ball @state)
                                 dt (:opengl? world))
-              win (winner? world pad1 pad2 ball)
+              win (winner?? world pad1 pad2 ball)
               ball
               (if-not (spos? win)
-                (traceBall pad1 pad2 ball world) ball)]
+                (hitPad?? world pad1 pad2 ball) ball)]
           (if (spos? win)
             (.updatePoint me win)
             (vswap! state assoc :ball ball)))))))
