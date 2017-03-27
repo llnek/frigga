@@ -95,50 +95,43 @@
   (let [{:keys [type code body] :as msg}
         (decodeEvent (:text m))]
     (log/debug "[JSON-STR]\n%s\n" (prettyEvent msg))
+    (swap! res conj code)
     (cond
       (= Events/PLAYREQ_OK code)
       (do
         ;;{:puid :pnum :game :room }
-        (reset! info  body)
-        (swap! res conj code))
+        (reset! info  body))
 
       (= Events/RESTART code)
       (let [{:keys [puid pnum game room]} @info
             b (get body (keyword puid))]
         ;;pick the extra stuff { :session_number :value :color }
-        (swap! info merge b)
-        (swap! res conj code))
+        (swap! info merge b))
 
       (= Events/START code)
       (let [{:keys [puid pnum game room]} @info
             b (get body (keyword puid))]
         ;;pick the extra stuff { :session_number :value :color }
-        (swap! info merge b)
-        (swap! res conj code))
+        (swap! info merge b))
 
       (= Events/GAME_WON code)
       (let [s (:status body)]
-        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" s)
-        (swap! res conj Events/GAME_WON))
+        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" s))
 
       (= Events/GAME_TIE code)
       (let [s (:status body)]
-        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" s)
-        (swap! res conj Events/GAME_TIE))
+        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" s))
 
       (= Events/PLAY_SCRUBBED code)
       (let [s (:pnum body)]
-        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: QUITTER= %d" s)
-        (swap! res conj code))
+        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: QUITTER= %d" s))
 
       (= Events/POKE_WAIT code)
-      (do
-        (swap! res conj code))
+      nil
 
       (= Events/POKE_MOVE code)
-      (do
-        (makeMove con info moves body)
-        (swap! res conj code)))))
+      (if-not (contains? @res Events/QUIT)
+        (makeMove con info moves body)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -175,8 +168,8 @@
             (do->true (reset! con2 c)))))
 
     (is (let []
+          (req-game @con1 "paul" "secret")
           (req-game @con2 "mary" "secret")
-          (req-game @con1 "joe" "secret")
           (pause 1500)
           (and (contains? @res1 Events/PLAYREQ_OK)
                (contains? @res1 Events/START)
@@ -201,8 +194,8 @@
 
   (testing "related to: replay game"
     (is (let []
-          (swap! res2 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
-          (swap! res1 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
+          (reset! res2 #{})
+          (reset! res1 #{})
           (reset! moves2 m2data)
           (reset! moves1 m1data)
           (.write ^WSClientConnect @con1
@@ -229,8 +222,8 @@
 
   (testing "related to: draw! game"
     (is (let []
-          (swap! res2 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
-          (swap! res1 disj Events/GAME_WON Events/POKE_WAIT Events/POKE_MOVE)
+          (reset! res2 #{})
+          (reset! res1 #{})
           (reset! moves2 m2draw)
           (reset! moves1 m1draw)
           (.write ^WSClientConnect @con1
@@ -257,8 +250,8 @@
 
   (testing "related to: quit! game"
     (is (let []
-          (swap! res2 disj Events/GAME_WON Events/GAME_TIE Events/POKE_WAIT Events/POKE_MOVE)
-          (swap! res1 disj Events/GAME_WON Events/GAME_TIE Events/POKE_WAIT Events/POKE_MOVE)
+          (reset! res2 #{})
+          (reset! res1 #{})
           (reset! moves2 m2draw)
           (reset! moves1 m1draw)
           (.write ^WSClientConnect @con1
@@ -268,18 +261,13 @@
                (contains? @res2 Events/RESTART))))
 
     (is (let []
+          (swap! res2 conj Events/QUIT)
+          (swap! res1 conj Events/QUIT)
           (.write ^WSClientConnect @con2
                   (encodeEventAsJson (privateEvent<> Events/STARTED {})))
           (.write ^WSClientConnect @con1
                   (encodeEventAsJson (privateEvent<> Events/STARTED {})))
-          (pause 1500)
-          (and (or (contains? @res1 Events/POKE_MOVE)
-                   (contains? @res1 Events/POKE_WAIT))
-               (or (contains? @res2 Events/POKE_MOVE)
-                   (contains? @res2 Events/POKE_WAIT)))))
-
-    (is (let []
-          (pause 2000)
+          (pause 1000)
           (.write ^WSClientConnect @con2
                   (encodeEventAsJson (privateEvent<> Events/QUIT {})))
           (pause 1500)

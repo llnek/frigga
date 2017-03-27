@@ -142,11 +142,11 @@
           (log/debug "game got an update %s" evt)
           (cond
             (isMove? evt)
-            (do
+            (do->nil
               (log/debug "rec'ved %s from [%s]" body context)
               (.enqueue me body))
           (isQuit? evt)
-          nil)))
+          Events/TEAR_DOWN)))
 
       BoardAPI
 
