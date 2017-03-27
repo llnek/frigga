@@ -123,8 +123,13 @@
 
       (= Events/GAME_TIE code)
       (let [s (:status body)]
-        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" 0)
+        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" s)
         (swap! res conj Events/GAME_TIE))
+
+      (= Events/PLAY_SCRUBBED code)
+      (let [s (:pnum body)]
+        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: QUITTER= %d" s)
+        (swap! res conj code))
 
       (= Events/POKE_WAIT code)
       (do
@@ -250,6 +255,36 @@
           (and (or (contains? @res1 Events/GAME_TIE)
                    (contains? @res2 Events/GAME_TIE))))))
 
+  (testing "related to: quit! game"
+    (is (let []
+          (swap! res2 disj Events/GAME_WON Events/GAME_TIE Events/POKE_WAIT Events/POKE_MOVE)
+          (swap! res1 disj Events/GAME_WON Events/GAME_TIE Events/POKE_WAIT Events/POKE_MOVE)
+          (reset! moves2 m2draw)
+          (reset! moves1 m1draw)
+          (.write ^WSClientConnect @con1
+                  (encodeEventAsJson (privateEvent<> Events/REPLAY {})))
+          (pause 1500)
+          (and (contains? @res1 Events/RESTART)
+               (contains? @res2 Events/RESTART))))
+
+    (is (let []
+          (.write ^WSClientConnect @con2
+                  (encodeEventAsJson (privateEvent<> Events/STARTED {})))
+          (.write ^WSClientConnect @con1
+                  (encodeEventAsJson (privateEvent<> Events/STARTED {})))
+          (pause 1500)
+          (and (or (contains? @res1 Events/POKE_MOVE)
+                   (contains? @res1 Events/POKE_WAIT))
+               (or (contains? @res2 Events/POKE_MOVE)
+                   (contains? @res2 Events/POKE_WAIT)))))
+
+    (is (let []
+          (pause 2000)
+          (.write ^WSClientConnect @con2
+                  (encodeEventAsJson (privateEvent<> Events/QUIT {})))
+          (pause 1500)
+          (and (or (contains? @res1 Events/PLAY_SCRUBBED)
+                   (contains? @res2 Events/PLAY_SCRUBBED))))))
 
   (is (string? "That's all folks!")))
 

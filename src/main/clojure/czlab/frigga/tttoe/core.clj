@@ -138,11 +138,15 @@
           (.dequeue me nil)))
 
       (onEvent [me evt]
-        (log/debug "game engine got an update %s" evt)
-        (if (isMove? evt)
-          (let [b (:body evt)]
-            (log/debug "rec'ved cmd %s from session %s" b (:context evt))
-            (.enqueue me b))))
+        (let [{:keys [^Session context body]} evt]
+          (log/debug "game got an update %s" evt)
+          (cond
+            (isMove? evt)
+            (do
+              (log/debug "rec'ved %s from [%s]" body context)
+              (.enqueue me body))
+          (isQuit? evt)
+          nil)))
 
       BoardAPI
 
