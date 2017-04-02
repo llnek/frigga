@@ -27,6 +27,7 @@
         [czlab.basal.str])
 
   (:import [czlab.jasal Restartable Startable]
+           [czlab.basal Stateful]
            [czlab.loki.game Game]
            [czlab.loki.sys Room]
            [czlab.loki.net Events]))
@@ -394,7 +395,7 @@
 (defn- getFrames "" [sessions]
   (->> (preduce<vec>
          #(let [{:keys [framespersec]}
-                (.deref %2)]
+                (.deref ^Stateful %2)]
             (if (spos? framespersec)
               (conj! %1 framespersec) %1)) sessions)
        (apply min 60)))
@@ -449,7 +450,7 @@
           p2 (wrapPlayer (long \O) :O s2)]
       (aset #^"[Ljava.lang.Object;" actors 2 p2)
       (aset #^"[Ljava.lang.Object;" actors 1 p1)
-      (log/debug "pong: init: state= %s" (dissoc @data :room))
+      ;;(log/debug "pong: init: state= %s" @data)
       (log/debug "Player2: %s" p2)
       (log/debug "Player1: %s" p1)))
 
@@ -528,8 +529,8 @@
           @data
           [p1 p2] (cfgPads world paddle)
           b (cfgBall world ball)
-          c2 (.playerXXX me 2 :color)
-          c1 (.playerXXX me 1 :color)]
+          c2 (:color (.player me 2))
+          c1 (:color (.player me 1))]
       (vswap! data merge {c2 p2 c1 p1 :ball b})
       (->> {:score score :ball b c2 p2 c1 p1}
            (bcast! room Events/START_ROUND ))))
@@ -609,12 +610,14 @@
     (entity<> Pong
               {:paddle (ctorObj w 50 12 _paddle-speed_)
                :ball (ctorObj w 15 15 _ball-speed_)
-               :world w
+               :sessions sessions
+               :room room
                :actors (object-array 3)
                :framespersec fps
                :tick (/ 1000 fps)
                :syncMillis 2000
                :numpts 5
+               :world w
                :score {}} true)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

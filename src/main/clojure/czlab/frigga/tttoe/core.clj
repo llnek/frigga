@@ -116,6 +116,7 @@
           p2 (gistPlayer (long \O) :O s2)]
       (aset #^"[Ljava.lang.Object;" actors 2 p2)
       (aset #^"[Ljava.lang.Object;" actors 1 p1)
+      ;;(log/debug "tictactoe: init: state= %s" @data)
       (log/debug "Player2: %s" p2)
       (log/debug "Player1: %s" p1)))
 
@@ -193,9 +194,9 @@
           (.drawGame me cmd)
           (.toggleActor me cmd)))))
 
-  (fmtStatus [_ data status]
+  (fmtStatus [_ msg status]
     (let [{:keys [grid]} @data]
-      (merge data {:grid (vec grid) :status status})))
+      (merge msg {:grid (vec grid) :status status})))
 
   (drawGame [me cmd]
     (log/debug "game to end, no winner!!!")
@@ -255,6 +256,7 @@
             {:goalspace (genGoalSpace _bsize_)
              :sessions sessions
              :grid grid
+             :room room
              :actors (object-array 3)})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
