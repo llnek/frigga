@@ -25,7 +25,8 @@
         [czlab.basal.core]
         [czlab.basal.str])
 
-  (:import [czlab.loki.game Game]
+  (:import [czlab.jasal Restartable Startable]
+           [czlab.loki.game Game]
            [czlab.loki.sys Room]
            [czlab.loki.net Events]))
 
@@ -37,42 +38,43 @@
 (def ^:private _bsize_ 3)
 (def ^:private _cvz_ 0)
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- mapGoalSpace "" [bsize]
-  (with-local-vars
-    [dx (long-array bsize 0)
-     dy (long-array bsize 0)
-     rowsp (transient [])
-     colsp (transient [])]
-    (doseq [r (range 0 bsize)
-           :let [h (long-array bsize 0)
-                 v (long-array bsize 0)]]
-      (doseq [c (range 0 bsize)]
-        (aset h c (long (+ c (* r bsize))))
-        (aset v c (long (+ r (* c bsize)))))
-      (var-set rowsp (conj! @rowsp h))
-      (var-set colsp (conj! @colsp v))
-      (aset ^longs @dx
-            r
-            (long (+ (* r bsize) r)))
-      (aset ^longs @dy
-            r
-            (long (+ r (* bsize
-                          (dec (- bsize r)))))))
-    (into [] (concat [@dx] [@dy]
-                     (persistent! @rowsp)
-                     (persistent! @colsp)))))
+(defn- genGoalSpace  "" [bsize]
+  (let [arr #(preduce<vec>
+                (fn [a _]
+                  (conj! a (long-array bsize 0))) (range %))
+        rows (arr bsize)
+        cols (arr bsize)
+        dags (arr 2)]
+    (doseq [n (range bsize)]
+      (doseq [k (range bsize)]
+        (aset ^longs (nth rows n) k ^long (+ (* bsize n) k))))
+    (doseq [n (range bsize)]
+      (doseq [k (range bsize)
+              :let [r0 (nth rows 0)]]
+        (aset ^longs (nth cols n) k ^long (+ (aget ^longs r0 n)
+                                             (* bsize k)))))
+    (doseq [n (range bsize)]
+      (aset ^longs
+            (first dags)
+            n
+            (aget ^longs (nth rows n) n))
+      (aset ^longs
+            (last dags)
+            n
+            (aget ^longs (nth rows n) (- bsize n 1))))
+    (into [] (concat dags rows cols))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (comment
-  (doseq [v (mapGoalSpace 3)]
+  (doseq [v (genGoalSpace 3)]
   (println (seq v))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- reifyPlayer
+(defn- gistPlayer
   "" [idValue pcolor psession]
   {:value idValue :color pcolor :session psession })
 
@@ -81,11 +83,9 @@
 (defprotocol BoardAPI
   ""
   (fmtStatus [_ cmd status] )
-  (registerPlayers [_ p1 p2])
-  (getCur [_])
-  (getOther [_ a])
-  (getPlayer2 [_])
-  (getPlayer1 [_])
+  (gcur [_])
+  (gother [_ a])
+  (player [_ _])
   (enqueue [_ cmd])
   (checkWin [_ cmd])
   (drawGame [_ cmd])
@@ -94,8 +94,8 @@
   (onStopReset [_])
   (repoke [_])
   (dequeue [_ cmd])
-  (isStalemate [_])
-  (isWinner [_ a]))
+  (stalemate? [_])
+  (winner? [_ a]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -110,27 +110,29 @@
   (endRound [_])
   (init [me _]
     (log/debug "tictactoe: init called()")
-    (let [[s1 s2] (:sessions @data)]
-      (. ^BoardAPI
-         me
-         registerPlayers
-         (reifyPlayer (long \X) :X s1)
-         (reifyPlayer (long \O) :O s2))))
-  (restart [me] (.restart ^Restartable me _empty-map_))
-  (restart [me _] (.start ^Startable me _))
-  (start [me] (.start ^Startable me _empty-map_))
+    (let [{:keys [sessions actors]} @data
+          [s1 s2] sessions
+          p1 (gistPlayer (long \X) :X s1)
+          p2 (gistPlayer (long \O) :O s2)]
+      (aset #^"[Ljava.lang.Object;" actors 2 p2)
+      (aset #^"[Ljava.lang.Object;" actors 1 p1)
+      (log/debug "Player2: %s" p2)
+      (log/debug "Player1: %s" p1)))
+
+  (restart [me] (.restart me _empty-map_))
+  (restart [me _] (.start me _))
+  (start [me] (.start me _empty-map_))
   (start [me _]
-    (let [which (if (> (randSign) 0) 1 2)
-          {:keys [numcells
-                  actors grid]} @data
-          _ (doall
-              (for [x (range 0 numcells)]
-                (aset-long grid x _cvz_)))]
+    (let [{:keys [actors grid]} @data
+          sz (alength ^longs grid)]
+      (doall (map #(aset-long grid % _cvz_)
+                  (range sz)))
       (log/debug "tictactoe: start called()")
       (log/debug "tictactoe: grid = %s" (vec grid))
-      (->> (aget #^"[Ljava.lang.Object;" actors which)
+      (->> (if (> (randSign) 0) 1 2)
+           (aget #^"[Ljava.lang.Object;" actors)
            (aset #^"[Ljava.lang.Object;" actors 0))
-      (. ^BoardAPI me dequeue _empty-map_)))
+      (. me dequeue _empty-map_)))
   (onEvent [me evt]
     (let [{:keys [context body]} evt]
       (log/debug "game got an update %s" evt)
@@ -138,64 +140,58 @@
         (isMove? evt)
         (do->nil
           (log/debug "rec'ved %s from [%s]" body context)
-          (. ^BoardAPI me enqueue body))
+          (. me enqueue body))
         (isQuit? evt)
         Events/TEAR_DOWN)))
 
   BoardAPI
-  (gcur [_] (. ^BoardAPI me player 0))
 
-  (regoPlayers [this p1 p2]
-    (let [{:keys [actors]} @data]
-      (aset #^"[Ljava.lang.Object;" actors 2 p2)
-      (aset #^"[Ljava.lang.Object;" actors 1 p1)
-      (log/debug "Player2: %s" p2)
-      (log/debug "Player1: %s" p1)))
+  (gcur [me] (.player me 0))
   (player [_ n]
     (aget #^"[Ljava.lang.Object;" (:actors @data) n))
 
   (dequeue [me cmd]
-    (let [{:keys [grid]} @data
+    (let [{:keys [room grid]} @data
           cp (.gcur me)
           op (.gother me cp)
-          src {:grid (vec grid)}
-          src (if (map? cmd)
-                (assoc src :cmd cmd) src)
+          src {:grid (vec grid)
+               :cmd cmd}
           cpss (:session cp)
           opss (:session op)]
-      (pokeWait! room
-                 (assoc src :pnum (:number @opss)) opss)
-      (pokeMove! room
-                 (assoc src :pnum (:number @cpss)) cpss)))
+      (doto room
+        (pokeWait! (assoc src :pnum (:number @opss)) opss)
+        (pokeMove! (assoc src :pnum (:number @cpss)) cpss))))
 
   (repoke [me]
     (let [pss (:session (.gcur me))
-          {:keys [grid]} @data]
+          {:keys [room grid]} @data]
       (pokeMove! room
                  {:pnum (:number @pss)
                   :grid (vec grid)} pss)))
 
   (enqueue [me cmd]
-    (let [{:keys [numcells grid]} @data
-          cell (or (:cell cmd) 911)
-          cval (:value cmd)]
-      (if (and (>= cell 0)
-               (< cell numcells)
-               (= (:value (.gcur me)) cval)
-               (= _cvz_ (aget grid cell)))
+    (let [{:keys [cell value]} cmd
+          {:keys [grid]} @data
+          sz (alength ^longs grid)]
+      (if (and (number? cell)
+               (>= cell 0)
+               (< cell sz)
+               (= (:value (.gcur me)) value)
+               (= _cvz_ (aget ^longs grid cell)))
         (do
-          (aset ^longs grid cell (long cval))
-          (. ^BoardAPI me checkWin cmd))
-        (.repoke ^BoardAPI me))))
+          (aset-long grid cell (long value))
+          (. me checkWin cmd))
+        (.repoke me))))
 
   (checkWin [me cmd]
-    (log/debug "current grid = %s" (vec grid))
-    (log/debug "checking for %s" cmd)
-    (if-some [combo (. me isWinner (.gcur me))]
-      (. me endGame cmd combo)
-      (if (.isStalemate me)
-        (.drawGame me cmd)
-        (.toggleActor me cmd))))
+    (let [{:keys [grid]} @data]
+      (log/debug "current grid = %s" (vec grid))
+      (log/debug "checking for %s" cmd)
+      (if-some [combo (.winner? me (.gcur me))]
+        (.endGame me cmd combo)
+        (if (.stalemate? me)
+          (.drawGame me cmd)
+          (.toggleActor me cmd)))))
 
   (fmtStatus [_ data status]
     (let [{:keys [grid]} @data]
@@ -204,7 +200,7 @@
   (drawGame [me cmd]
     (log/debug "game to end, no winner!!!")
     (.onStopReset me)
-    (bcast! room
+    (bcast! (:room @data)
             Events/GAME_TIE
             (.fmtStatus me
                         {:cmd cmd :combo []} 0)))
@@ -214,40 +210,52 @@
           pnum (:number @pss)]
       (log/debug "game to end, winner found! combo = %s" combo)
       (.onStopReset me)
-      (bcast! room
+      (bcast! (:room @data)
               Events/GAME_WON
               (.fmtStatus me {:cmd cmd :combo combo} pnum))))
 
   (toggleActor [me cmd]
     (aset #^"[Ljava.lang.Object;"
-          actors 0 (.gother me (.gcur me)))
+          (:actors @data) 0 (.gother me (.gcur me)))
     (.dequeue me cmd))
 
-  (onStopReset [_] (.stop ^Startable room))
+  (onStopReset [_] (.stop ^Startable (:room @data)))
 
-  (isStalemate [_]
-    (not (some #(= _cvz_ %) (seq (:grid data)))))
+  (stalemate? [_]
+    (not (some #(= _cvz_ %) (seq (:grid @data)))))
 
-  (isWinner [me actor]
+  (winner? [me actor]
     (let [{:keys [grid]} @data]
       (log/debug "isWinner? actor-value = %s" (:value actor))
       (some (fn [r]
               (if (every? #(= (:value actor) %)
-                          (let [xxx (amap ^longs r idx ret
+                          (let [a (amap ^longs r idx ret
                                           (long (aget ^longs grid
                                                       (aget ^longs r idx))))]
-                            (log/debug "test row: %s" (vec xxx))
-                            xxx))
-              (vec r))) goalspace)))
+                            (log/debug "test row: %s" (vec a))
+                            a))
+              (vec r))) (:goalspace @data))))
 
   (gother [_ cp]
-    (condp identical? cp
-      (aget #^"[Ljava.lang.Object;" actors 1)
-      (aget #^"[Ljava.lang.Object;" actors 2)
-      ;;else
-      (aget #^"[Ljava.lang.Object;" actors 2)
-      (aget #^"[Ljava.lang.Object;" actors 1)
-      nil)))
+    (let [{:keys [actors]} @data]
+      (condp identical? cp
+        (aget #^"[Ljava.lang.Object;" actors 1)
+        (aget #^"[Ljava.lang.Object;" actors 2)
+        (aget #^"[Ljava.lang.Object;" actors 2)
+        (aget #^"[Ljava.lang.Object;" actors 1)
+        nil))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn tictactoe
+  "" ^Game [room sessions]
+
+  (let [grid (long-array (* _bsize_ _bsize_) _cvz_)]
+    (entity<> TicTacToe
+            {:goalspace (genGoalSpace _bsize_)
+             :sessions sessions
+             :grid grid
+             :actors (object-array 3)})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;EOF
