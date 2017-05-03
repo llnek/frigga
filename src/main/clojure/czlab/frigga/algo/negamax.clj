@@ -17,17 +17,26 @@
 
   czlab.frigga.algo.negamax
 
-  (:require [czlab.basal.logging :as log]
+  (:require [czlab.loki.xpis :as loki :refer :all]
+            [czlab.basal.logging :as log]
             [clojure.string :as cs])
 
   (:use [czlab.basal.core]
         [czlab.basal.str])
 
-  (:import [czlab.loki.game Board]))
-
+  (:import [czlab.basal.core GenericMutable]
+           [java.io File]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;(set! *warn-on-reflection* true)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defprotocol NegaAlgoAPI "" (eval-algo [_]))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(decl-mutable NegaSnapshotObj )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -35,94 +44,78 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defprotocol NegaAlgoAPI "" (evaluate [_]))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-(defprotocol NegaSnapshotAPI
-  ""
-  (setLastBestMove [_ m] )
-  (setOther [_ o] )
-  (setCur [_ c] )
-  (setState [_ s] )
-  (lastBestMove [_] )
-  (other [_] )
-  (cur [_] )
-  (state [_] ))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
 (defn- negaMaxAlgo
   "The Nega-Max algo implementation"
-  [^Board board game maxDepth depth alpha beta]
+  [board game maxDepth depth alpha beta]
 
   (if (or (== depth 0)
-          (.isOver board game))
-    (.evalScore board game)
+          (game-over? board game))
+    (eval-score board game)
     ;;:else
-    (with-local-vars
-      [openMoves (.getNextMoves board game)
-       bestValue (- _pinf_)
-       localAlpha alpha
-       halt false
-       rc 0
-       bestMove (nth openMoves 0) ]
+    (let
+      [mu (GenericMutable. {:openMoves (get-next-moves board game)
+                            :bestValue (- _pinf_)
+                            :localAlpha alpha
+                            :halt? false
+                            :rc 0})
+       _ (setf! mu :bestMove (nth (:openMoves @mu) 0))]
       (when (== depth maxDepth)
-        (setLastBestMove game (nth @openMoves 0))) ;; this will change overtime, most likely
+        (setf! game
+               :lastBestMove
+               (nth (:openMoves @mu) 0)))
       (loop [n 0]
-        (when-not (or (> n (count @openMoves))
-                      (true? @halt))
-          (let [move (nth @openMoves n) ]
+        (when-not (or (> n (count (:openMoves @mu)))
+                      (true? (:halt? @mu)))
+          (let [move (nth (:openMoves @mu) n)]
             (doto board
-              (.makeMove game move)
-              (.switchPlayer game))
-            (var-set rc (- (negaMaxAlgo board
-                                        game
-                                        maxDepth
-                                        (dec depth)
-                                        (- beta) (- @localAlpha))))
+              (make-move game move)
+              (switch-player game))
+            (setf! mu
+                   :rc
+                   (- (negaMaxAlgo board
+                                   game
+                                   maxDepth
+                                   (dec depth)
+                                   (- beta) (- (:localAlpha @mu)))))
             (doto board
-              (.switchPlayer game)
-              (.unmakeMove game move))
-            (var-set bestValue (Math/max (long @bestValue) (long @rc)))
-            (when (< @localAlpha @rc)
-              (var-set localAlpha @rc)
-              (var-set bestMove move)
+              (switch-player game)
+              (unmake-move game move))
+            (setf! mu
+                   :bestValue
+                   (Math/max (long (:rc @mu))
+                             (long (:bestValue @mu))))
+            (when (< (:localAlpha @mu) (:rc @mu))
+              (setf! mu :localAlpha (:rc @mu))
+              (setf! mu :bestMove move)
               (when (== depth maxDepth)
-                (setLastBestMove game move))
-              (when (>= @localAlpha beta)
-                (var-set halt true)))
+                (setf! game :lastBestMove move))
+              (when (>= (:localAlpha @mu) beta)
+                (setf! mu :halt? true)))
             (recur (inc n) ))))
-      @bestValue)))
+      (:bestValue @mu))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn negamax<>
-  "Implementation of nega-max" [^Board board]
+  "Implementation of nega-max" [board]
 
   (reify
     NegaAlgoAPI
-    (evaluate [_]
-      (let [snapshot (.takeSnapshot board) ]
+    (eval-algo [_]
+      (let [snapshot (take-snap-shot board)]
         (negaMaxAlgo board snapshot 10 10 (- _pinf_) _pinf_)
-        (lastBestMove snapshot)))))
+        (:lastBestMove @snapshot)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn snapshot<>
   "Create a snapshot" []
 
-  (let [impl (muble<>)]
-    (reify
-      NegaSnapshotAPI
-      (setLastBestMove [_ m] (.setv impl :lastbestmove m))
-      (setOther [_ o] (.setv impl :other o))
-      (setCur [_ c] (.setv impl :cur c))
-      (setState [_ s] (.setv impl :state s))
-      (lastBestMove [_] (.getv impl :lastbestmove))
-      (other [_] (.getv impl :other))
-      (cur [_] (.getv impl :cur))
-      (state [_] (.getv impl :state)))))
+  (mutable<> NegaSnapshotObj
+             {:lastBestMove nil
+              :otherPlayer nil
+              :curPlayer nil
+              :state nil }))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;EOF

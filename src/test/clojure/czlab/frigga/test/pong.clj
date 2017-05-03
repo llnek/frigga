@@ -11,19 +11,21 @@
 
   czlab.frigga.test.pong
 
-  (:require [czlab.convoy.nettio.client :as cc]
+  (:require [czlab.loki.xpis :as loki :refer :all]
+            [czlab.nettio.client :as cc]
             [czlab.basal.logging :as log])
 
-  (:import [czlab.convoy.nettio WSClientConnect]
-           [czlab.loki.net Events])
-
-  (:use [czlab.wabbit.sys.core]
-        [czlab.loki.net.core]
+  (:use [czlab.loki.net.core]
+        [czlab.wabbit.xpis]
+        [czlab.wabbit.core]
         [czlab.basal.format]
         [czlab.basal.core]
         [czlab.basal.str]
         [czlab.basal.io]
-        [clojure.test]))
+        [clojure.test])
+
+  (:import [czlab.nettio WSClientConnect]
+           [czlab.jasal XData]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -47,8 +49,8 @@
                      :user "sa"
                      :passwd ""}}
    :plugins {:web
-             {:$pluggable :czlab.wabbit.plugs.io.http/HTTP
-              :handler :czlab.loki.sys.core/lokiHandler
+             {:$pluggable :czlab.wabbit.plugs.http/HTTP
+              :handler :czlab.loki.core/lokiHandler
               :host "localhost"
               :port 9090
               :wsockPath #{ "/loki/tictactoe" "/loki/pong"}
@@ -80,56 +82,56 @@
             (do (reset! moves (drop 1 @moves)) m))]
     (when c
       (->> {:value value :cell c}
-           (privateEvent<> Events/PLAY_MOVE )
-           encodeEventAsJson
+           (privateEvent<> ::loki/play-move)
+           encodeEvent
            (.write ^WSClientConnect @con)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- concb [id con info moves res c m]
   (let [{:keys [type code body] :as msg}
-        (decodeEvent (:text m))]
+        (decodeEvent (.strit ^XData (:body m)))]
     (log/debug "[JSON-STR]\n%s\n" (prettyEvent msg))
     (cond
-      (= Events/PLAYREQ_OK code)
+      (= ::loki/playreq-ok code)
       (do
         ;;{:puid :pnum :game :room }
         (reset! info  body)
         (swap! res conj code))
 
-      (= Events/RESTART code)
+      (= ::loki/restart code)
       (let [{:keys [puid pnum game room]} @info
             b (get body (keyword puid))]
         ;;pick the extra stuff { :session_number :value :color }
         (swap! info merge b)
         (swap! res conj code))
 
-      (= Events/START code)
+      (= ::loki/start code)
       (let [{:keys [puid pnum game room]} @info
             b (get body (keyword puid))]
         ;;pick the extra stuff { :session_number :value :color }
         (swap! info merge b)
         (swap! res conj code))
 
-      (= Events/GAME_WON code)
+      (= ::loki/game-won code)
       (let [s (:status body)]
-        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" s)
-        (swap! res conj Events/GAME_WON))
+        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %s" s)
+        (swap! res conj ::loki/game-won))
 
-      (= Events/GAME_TIE code)
+      (= ::loki/game-tie code)
       (let [s (:status body)]
-        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %d" 0)
-        (swap! res conj Events/GAME_TIE))
+        (log/debug "CB>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>: WINNER= %s" 0)
+        (swap! res conj ::loki/game-tie))
 
-      (= Events/SYNC_ARENA code)
+      (= ::loki/sync-arena code)
       (do
         (swap! res conj code))
 
-      (= Events/POKE_WAIT code)
+      (= ::loki/poke-wait code)
       (do
         (swap! res conj code))
 
-      (= Events/POKE_MOVE code)
+      (= ::loki/poke-move code)
       (do
         (makeMove con info moves body)
         (swap! res conj code)))))
@@ -142,11 +144,12 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- req-game "" [^WSClientConnect c user pwd]
-  (->> {:type Events/PRIVATE :code Events/PLAYGAME_REQ
+  (->> {:type ::loki/private
+        :code ::loki/playgame-req
         :body {:gameid "fa0860f976dc41358bc7bd5af3147d55"
                :principal user
                :credential pwd}}
-       encodeEventAsJson
+       encodeEvent
        (.write c )))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -172,16 +175,16 @@
           (req-game @con2 "mary" "secret")
           (req-game @con1 "joe" "secret")
           (pause 1500)
-          (and (contains? @res1 Events/PLAYREQ_OK)
-               (contains? @res1 Events/START)
-               (contains? @res2 Events/PLAYREQ_OK)
-               (contains? @res2 Events/START))))
+          (and (contains? @res1 ::loki/playreq-ok)
+               (contains? @res1 ::loki/start)
+               (contains? @res2 ::loki/playreq-ok)
+               (contains? @res2 ::loki/start))))
 
     (is (let []
           (.write ^WSClientConnect @con2
-                  (encodeEventAsJson (privateEvent<> Events/STARTED {})))
+                  (encodeEvent (privateEvent<> ::loki/started {})))
           (.write ^WSClientConnect @con1
-                  (encodeEventAsJson (privateEvent<> Events/STARTED {})))
+                  (encodeEvent (privateEvent<> ::loki/started {})))
           (pause 15000)
           true))
 

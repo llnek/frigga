@@ -18,15 +18,14 @@
         [czlab.basal.core]
         [czlab.basal.str])
 
-  (:import [czlab.wabbit.sys Execvisor]
-           [java.io File]))
+  (:import [java.io File]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;(set! *warn-on-reflection* true)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn friggaMain "" [^Execvisor exec]
+(defn friggaMain "" [exec]
 
   (-> (preduce<map>
         #(let [[k v] %2]
@@ -34,7 +33,7 @@
                    (keyword (:uuid v))
                    (-> (dissoc v :uuid)
                        (assoc :uri (str "/" (name k))))))
-        (:games (.config exec)))
+        (:games (:conf @exec)))
 
       initGameRegistry!))
 

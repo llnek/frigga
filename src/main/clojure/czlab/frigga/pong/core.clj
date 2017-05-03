@@ -17,20 +17,17 @@
 
   czlab.frigga.pong.core
 
-  (:require [czlab.basal.logging :as log])
+  (:require [czlab.loki.xpis :as loki :refer :all]
+            [czlab.basal.logging :as log])
 
   (:use [czlab.loki.net.core]
-        [czlab.loki.sys.util]
+        [czlab.loki.util]
         [czlab.basal.process]
         [czlab.basal.format]
         [czlab.basal.core]
         [czlab.basal.str])
 
-  (:import [czlab.jasal Restartable Startable]
-           [czlab.basal Stateful]
-           [czlab.loki.game Game]
-           [czlab.loki.sys Room]
-           [czlab.loki.net Events]))
+  (:import [czlab.jasal Startable Initable Restartable]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;(set! *warn-on-reflection* true)
@@ -48,22 +45,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defmacro ^:private halve [v] `(* ~v 0.5))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-(defprotocol GameAPI
-  ""
-  (playerXXX [_ _ _])
-  (player [_ _])
-  (gameOver [_ winner])
-  (enqueue [_ evt])
-  (postUpdateArena [_])
-  (runGameLoop [_ _])
-  (pokeAndStartUI [_] )
-  (updateArena [_] )
-  (syncClients [_] )
-  (updatePoint [_ winner] )
-  (syncTick [_ dt] ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -395,7 +376,7 @@
 (defn- getFrames "" [sessions]
   (->> (preduce<vec>
          #(let [{:keys [framespersec]}
-                (.deref ^Stateful %2)]
+                (deref %2)]
             (if (spos? framespersec)
               (conj! %1 framespersec) %1)) sessions)
        (apply min 60)))
@@ -434,191 +415,203 @@
   (doto
     {:speed s :theta 0 :x 0 :y 0 :width h :height w}))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- getPlayer "" [me n]
+  (aget #^"[Ljava.lang.Object;" (:actors @me) n))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- gameOver "" [me winner]
+  (let [src {:winner (merge (:score @me)
+                            {:pnum winner})}]
+    (log/debug "game over: winner is %s" src)
+    (.stop ^Startable me)
+    (bcast! (:room @me) ::loki/game-won src)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- enqueue "" [me evt]
+  (let [{:keys [room context body]}
+        evt
+        pnum (:number @context)
+        p2 (getPlayer me 2)
+        p1 (getPlayer me 1)
+        kw (:color (if (= pnum 1) p1 p2))
+        st (:session (if (= pnum 1) p2 p1))
+        pv (:pv (kw body))
+        sign (numSign pv)]
+    (setf! me
+           kw
+           (assoc (kw @me)
+                  :theta sign))
+    (syncArena! room body st)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- postUpdateArena "" [me]
+  (let [{:keys [score numpts tick]} @me
+        [a b] (vals score)]
+    ;;someone has won, get out
+    (if (or (>= b numpts)
+            (>= a numpts))
+      (trap! Exception "loop breaker")
+      (try! (Thread/sleep tick)))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- pokeAndStartUI "" [me]
+  (let [{:keys [world paddle ball room score]}
+        @me
+        [p1 p2] (cfgPads world paddle)
+        b (cfgBall world ball)
+        c2 (:color (getPlayer me 2))
+        c1 (:color (getPlayer me 1))]
+    (copy* me {c2 p2 c1 p1 :ball b})
+    (->> {:score score :ball b c2 p2 c1 p1}
+         (bcast! room ::loki/start-round ))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Update UI with states of local entities
+(defn- syncClients "" [me]
+  (let [c2 (:color (getPlayer me 2))
+        c1 (:color (getPlayer me 1))
+        src (select-keys @me [c2 c1 :ball])]
+    (log/debug "sync new ball values %s" (:ball src))
+    (syncArena! (:room @me) src)))
+
+(declare syncTick)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- updateArena "" [me]
+  (if-not (:resetting-pt? @me)
+    (let [{:keys [lastTick lastSync syncMillis]}
+          @me
+          now (now<>)]
+      ;; --- update the game with the difference
+      ;;in ms since the
+      ;; --- last tick
+      (let [diff (- now lastTick)
+            lastSync2 (+ lastSync diff)]
+        (syncTick me (/ diff 1000))
+        (copy* me
+               {:lastTick now
+                :lastSync lastSync2})
+        ;; --- check if time to send a ball update
+        (when (> lastSync syncMillis)
+          (syncClients me)
+          (setf! me :lastSync 0))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;A point has been won. Update the score, and maybe trigger game-over
+(defn- updatePoint "" [me winner]
+  (let [{:keys [score numpts]} @me
+        p (getPlayer me winner)
+        c (:color p)
+        sx (inc (get score c))]
+    (setf! me :resetting-pt? true)
+    (setf! me
+           :score
+           (assoc (:score @me) c sx))
+    (log/debug "updated score by 1, new score: %s" (:score @me))
+    (if (>= sx numpts)
+      (gameOver me winner)
+      (start-round me {}))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Move local entities per game loop
+(defn- syncTick "" [me dt]
+  (let [{:keys [world]} @me
+        c2 (:color (getPlayer me 2))
+        c1 (:color (getPlayer me 1))
+        pad2 (syncPad world (c2 @me) dt)
+        pad1 (syncPad world (c1 @me) dt)
+        _ (copy* me {c2 pad2 c1 pad1})
+        ball (moveObject! (:ball @me)
+                          dt
+                          (:opengl? world))
+        win (winner?? world pad1 pad2 ball)
+        ball
+        (if-not (spos? win)
+          (hitPad?? world pad1 pad2 ball) ball)]
+    (if (spos? win)
+      (updatePoint me win)
+      (setf! me :ball ball))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- runGameLoop "" [me cmd]
+  (copy* me
+         {:lastTick (now<>)
+          :lastSync 0
+          :resetting-pt? false })
+  (if (:new? cmd)
+    (async! #(try!
+               (while true
+                 (try! (updateArena me))
+                 (postUpdateArena me)))
+            {:daemon true})))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defentity Pong
-  Game
-  (playerGist [_ id]
+(decl-volatile Pong
+  GameImpl
+  (get-player-gist [me id]
     (some #(let [s (:session %)]
              (if (= id (id?? (:player @s)))
-               (dissoc % :session))) (drop 1 (:actors @data))))
-  (init [_ _]
+               (dissoc % :session))) (drop 1 (:actors @me))))
+  (start-round [me cmd]
+    (doto me pokeAndStartUI (runGameLoop cmd)))
+  (end-round [_ ])
+  (on-game-event [me evt]
+    (log/debug "game engine got an update %s" (prettyEvent evt))
+    (if (isMove? evt)
+      (let [{:keys [body context]} evt]
+        (log/debug "rec'ved move: %s%s%s"
+                   body " from session " (id?? context))
+        (enqueue me evt))))
+  Initable
+  (init [me _]
     (let [{:keys [framepersec
-                  actors sessions]} @data
+                  actors sessions]} @me
           [s1 s2] sessions
           p1 (wrapPlayer (long \X) :X s1)
           p2 (wrapPlayer (long \O) :O s2)]
       (aset #^"[Ljava.lang.Object;" actors 2 p2)
       (aset #^"[Ljava.lang.Object;" actors 1 p1)
-      ;;(log/debug "pong: init: state= %s" @data)
-      (log/debug "Player2: %s" p2)
-      (log/debug "Player1: %s" p1)))
-
-  (startRound [me cmd]
-    (doto me .pokeAndStartUI (.runGameLoop cmd)))
-  (endRound [_ ])
-
-  (restart [me] (.restart me _empty-map_))
+      (log/debug "Player2: %s" (dissoc p2 :session))
+      (log/debug "Player1: %s" (dissoc p1 :session))))
+  Restartable
+  (restart [me] (.restart me nil))
   (restart [me arg] (.start me arg))
-  (start [me] (.start me _empty-map_))
+  Startable
+  (start [me] (.start me nil))
   (start [me arg]
     (log/debug "pong: start called()")
-    (->> {(:color (.player me 2)) 0
-          (:color (.player me 1)) 0}
-         (vswap! data assoc :score ))
-    (.startRound me {:new? true}))
-
-  (onEvent [this evt]
-    (log/debug "game engine got an update %s" evt)
-    (if (isMove? evt)
-      (let [{:keys [body context]} evt]
-        (log/debug "rec'ved move: %s%s%s"
-                   body " from session " context)
-        (.enqueue this evt))))
-
-  GameAPI
-
-  (player [_ n]
-    (aget #^"[Ljava.lang.Object;" (:actors @data) n))
-
-  (gameOver [me winner]
-    (let [src {:winner (merge (:score @data)
-                              {:pnum winner})}]
-      (log/debug "game over: winner is %s" src)
-      (.stop me)
-      (bcast! (:room @data) Events/GAME_WON src)))
-
-  (enqueue [me evt]
-    (let [{:keys [room context body]}
-          evt
-          pnum (:number @context)
-          p2 (.player me 2)
-          p1 (.player me 1)
-          kw (:color (if (= pnum 1) p1 p2))
-          st (:session (if (= pnum 1) p2 p1))
-          pv (:pv (kw body))
-          sign (numSign pv)]
-      (vswap! data
-              update-in [kw] assoc :theta sign)
-      (syncArena! room body st)))
-
-  (postUpdateArena [_]
-    (let [{:keys [score numpts tick]} @data
-          [a b] (vals score)]
-      ;;someone has won, get out
-      (if (or (>= b numpts)
-              (>= a numpts))
-        (trap! Exception "loop breaker")
-        (try! (Thread/sleep tick)))))
-
-  (runGameLoop [me cmd]
-    (vswap! data
-            assoc
-            :lastTick (now<>)
-            :lastSync 0
-            :resetting-pt? false)
-    (if (:new? cmd)
-      (async! #(try!
-                 (while true
-                   (try! (.updateArena me))
-                   (.postUpdateArena me)))
-              {:daemon true})))
-
-  (pokeAndStartUI [me]
-    (let [{:keys [world paddle ball room score]}
-          @data
-          [p1 p2] (cfgPads world paddle)
-          b (cfgBall world ball)
-          c2 (:color (.player me 2))
-          c1 (:color (.player me 1))]
-      (vswap! data merge {c2 p2 c1 p1 :ball b})
-      (->> {:score score :ball b c2 p2 c1 p1}
-           (bcast! room Events/START_ROUND ))))
-
-  (updateArena [me]
-    (if-not (:resetting-pt? @data)
-      (let [{:keys [lastTick lastSync syncMillis]}
-            @data
-            now (now<>)]
-        ;; --- update the game with the difference
-        ;;in ms since the
-        ;; --- last tick
-        (let [diff (- now lastTick)
-              lastSync2 (+ lastSync diff)]
-          (.syncTick me (/ diff 1000))
-          (vswap! data
-                  assoc
-                  :lastTick now
-                  :lastSync lastSync2)
-          ;; --- check if time to send a ball update
-          (when (> lastSync syncMillis)
-            (.syncClients me)
-            (vswap! data assoc :lastSync 0))))))
-
-  ;;Update UI with states of local entities
-  (syncClients [me]
-    (let [c2 (:color (.player me 2))
-          c1 (:color (.player me 1))
-          src (select-keys @data [c2 c1 :ball])]
-      (log/debug "sync new values %s" src)
-      (syncArena! (:room @data) src)))
-
-  ;;A point has been won. Update the score, and maybe trigger game-over
-  (updatePoint [me winner]
-    (let [{:keys [score numpts]} @data
-          p (.player me winner)
-          c (:color p)
-          sx (inc (get score c))]
-      (vswap! data
-              assoc
-              :resetting-pt? true)
-      (vswap! data
-              update-in
-              [:score]
-              assoc c sx)
-      (log/debug "updated score by 1, new score: %s" (:score @data))
-      (if (>= sx numpts)
-        (.gameOver me winner)
-        (.startRound me {}))))
-
-  ;;Move local entities per game loop
-  (syncTick [me dt]
-    (let [{:keys [world]} @data
-          c2 (:color (.player me 2))
-          c1 (:color (.player me 1))
-          pad2 (syncPad world (c2 @data) dt)
-          pad1 (syncPad world (c1 @data) dt)
-          _ (vswap! data assoc c2 pad2 c1 pad1)
-          ball (moveObject! (:ball @data)
-                            dt
-                            (:opengl? world))
-          win (winner?? world pad1 pad2 ball)
-          ball
-          (if-not (spos? win)
-            (hitPad?? world pad1 pad2 ball) ball)]
-      (if (spos? win)
-        (.updatePoint me win)
-        (vswap! data assoc :ball ball)))))
+    (->> {(:color (getPlayer me 2)) 0
+          (:color (getPlayer me 1)) 0}
+         (setf! me :score ))
+    (start-round me {:new? true})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn pong
-  "" ^Game [room sessions]
+  "" [room sessions]
 
   (let [fps (getFrames sessions)
         w (ctorWorld 320 480)]
-    (entity<> Pong
-              {:paddle (ctorObj w 50 12 _paddle-speed_)
-               :ball (ctorObj w 15 15 _ball-speed_)
-               :sessions sessions
-               :room room
-               :actors (object-array 3)
-               :framespersec fps
-               :tick (/ 1000 fps)
-               :syncMillis 2000
-               :numpts 5
-               :world w
-               :score {}} true)))
+    (mutable<> Pong
+               {:paddle (ctorObj w 50 12 _paddle-speed_)
+                :ball (ctorObj w 15 15 _ball-speed_)
+                :sessions sessions
+                :room room
+                :actors (object-array 3)
+                :framespersec fps
+                :tick (/ 1000 fps)
+                :syncMillis 2000
+                :numpts 5
+                :world w
+                :score {}} )))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;EOF
