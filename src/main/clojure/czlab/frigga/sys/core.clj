@@ -11,12 +11,11 @@
 
   czlab.frigga.sys.core
 
-  (:require [czlab.basal.logging :as log]
-            [clojure.java.io :as io])
-
-  (:use [czlab.loki.game.core]
-        [czlab.basal.core]
-        [czlab.basal.str])
+  (:require [czlab.basal.log :as log]
+            [clojure.java.io :as io]
+            [czlab.basal.core :as c]
+            [czlab.basal.str :as s]
+            [czlab.loki.game.core :as gc])
 
   (:import [java.io File]))
 
@@ -27,7 +26,7 @@
 ;;
 (defn friggaMain "" [exec]
 
-  (-> (preduce<map>
+  (-> (c/preduce<map>
         #(let [[k v] %2]
            (assoc! %1
                    (keyword (:uuid v))
@@ -35,8 +34,7 @@
                        (assoc :uri (str "/" (name k))))))
         (:games (:conf @exec)))
 
-      initGameRegistry!))
-
+      gc/initGameRegistry!))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;EOF

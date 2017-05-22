@@ -17,12 +17,11 @@
 
   czlab.frigga.algo.negamax
 
-  (:require [czlab.loki.xpis :as loki :refer :all]
-            [czlab.basal.logging :as log]
-            [clojure.string :as cs])
-
-  (:use [czlab.basal.core]
-        [czlab.basal.str])
+  (:require [czlab.loki.xpis :as loki]
+            [clojure.string :as cs]
+            [czlab.basal.core :as c]
+            [czlab.basal.str :as s]
+            [czlab.basal.log :as log])
 
   (:import [czlab.basal.core GenericMutable]
            [java.io File]))
@@ -36,7 +35,7 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(decl-mutable NegaSnapshotObj )
+(c/decl-mutable NegaSnapshotObj)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -49,48 +48,48 @@
   [board game maxDepth depth alpha beta]
 
   (if (or (== depth 0)
-          (game-over? board game))
-    (eval-score board game)
+          (loki/game-over? board game))
+    (loki/eval-score board game)
     ;;:else
     (let
-      [mu (GenericMutable. {:openMoves (get-next-moves board game)
+      [mu (GenericMutable. {:openMoves (loki/get-next-moves board game)
                             :bestValue (- _pinf_)
                             :localAlpha alpha
                             :halt? false
                             :rc 0})
-       _ (setf! mu :bestMove (nth (:openMoves @mu) 0))]
+       _ (c/setf! mu :bestMove (nth (:openMoves @mu) 0))]
       (when (== depth maxDepth)
-        (setf! game
-               :lastBestMove
-               (nth (:openMoves @mu) 0)))
+        (c/setf! game
+                 :lastBestMove
+                 (nth (:openMoves @mu) 0)))
       (loop [n 0]
         (when-not (or (> n (count (:openMoves @mu)))
                       (true? (:halt? @mu)))
           (let [move (nth (:openMoves @mu) n)]
             (doto board
-              (make-move game move)
-              (switch-player game))
-            (setf! mu
-                   :rc
-                   (- (negaMaxAlgo board
-                                   game
-                                   maxDepth
-                                   (dec depth)
-                                   (- beta) (- (:localAlpha @mu)))))
+              (loki/make-move game move)
+              (loki/switch-player game))
+            (c/setf! mu
+                     :rc
+                     (- (negaMaxAlgo board
+                                     game
+                                     maxDepth
+                                     (dec depth)
+                                     (- beta) (- (:localAlpha @mu)))))
             (doto board
-              (switch-player game)
-              (unmake-move game move))
-            (setf! mu
+              (loki/switch-player game)
+              (loki/unmake-move game move))
+            (c/setf! mu
                    :bestValue
                    (Math/max (long (:rc @mu))
                              (long (:bestValue @mu))))
             (when (< (:localAlpha @mu) (:rc @mu))
-              (setf! mu :localAlpha (:rc @mu))
-              (setf! mu :bestMove move)
+              (c/setf! mu :localAlpha (:rc @mu))
+              (c/setf! mu :bestMove move)
               (when (== depth maxDepth)
-                (setf! game :lastBestMove move))
+                (c/setf! game :lastBestMove move))
               (when (>= (:localAlpha @mu) beta)
-                (setf! mu :halt? true)))
+                (c/setf! mu :halt? true)))
             (recur (inc n) ))))
       (:bestValue @mu))))
 
@@ -102,7 +101,7 @@
   (reify
     NegaAlgoAPI
     (eval-algo [_]
-      (let [snapshot (take-snap-shot board)]
+      (let [snapshot (loki/take-snap-shot board)]
         (negaMaxAlgo board snapshot 10 10 (- _pinf_) _pinf_)
         (:lastBestMove @snapshot)))))
 
@@ -111,11 +110,11 @@
 (defn snapshot<>
   "Create a snapshot" []
 
-  (mutable<> NegaSnapshotObj
-             {:lastBestMove nil
-              :otherPlayer nil
-              :curPlayer nil
-              :state nil }))
+  (c/mutable<> NegaSnapshotObj
+               {:lastBestMove nil
+                :otherPlayer nil
+                :curPlayer nil
+                :state nil }))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;EOF

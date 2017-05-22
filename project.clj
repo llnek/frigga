@@ -9,12 +9,12 @@
   :url "https://github.com/llnek/frigga"
 
   :dependencies
-  [[org.clojure/clojurescript "1.9.521"]
+  [[org.clojure/clojurescript "1.9.542"]
    [org.clojure/clojure "1.8.0"]
-   [commons-logging "1.2"]
    [io.czlab/wabbit-cons "1.0.0"]
    [io.czlab/loki "1.0.0"]
-   [io.czlab/wabbit "1.0.0"]]
+   [io.czlab/wabbit "1.0.0"]
+   [io.czlab/wabbit-plugs "1.0.0"]]
 
   :plugins [[wabbit/lein-template "1.0.0"]
             [cider/cider-nrepl "0.14.0"]

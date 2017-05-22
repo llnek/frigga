@@ -11,27 +11,26 @@
 
   czlab.frigga.test.ttt
 
-  (:require [czlab.loki.xpis :as loki :refer :all]
-            [czlab.nettio.client :as cc]
-            [czlab.basal.logging :as log])
+  (:require [czlab.nettio.client :as cl]
+            [czlab.loki.net.core :as nc]
+            [czlab.loki.xpis :as loki]
+            [czlab.basal.log :as log]
+            [czlab.wabbit.core :as wc]
+            [czlab.basal.core :as c]
+            [czlab.basal.str :as s]
+            [czlab.basal.io :as i]
+            [czlab.basal.format :as f]
+            [czlab.wabbit.xpis :as xp])
 
-  (:use [czlab.loki.net.core]
-        [czlab.wabbit.xpis]
-        [czlab.wabbit.core]
-        [czlab.basal.format]
-        [czlab.basal.core]
-        [czlab.basal.str]
-        [czlab.basal.io]
-        [clojure.test])
+  (:use [clojure.test])
 
-  (:import [czlab.nettio WSClientConnect]
-           [czlab.jasal XData]))
+  (:import [czlab.jasal XData]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (def ^:private _dburl_
   (str "jdbc:h2:"
-       (fpath *tempfile-repo*) "/" (jid<>)
+       (c/fpath i/*tempfile-repo*) "/" (c/jid<>)
        ";MVCC=TRUE;AUTO_RECONNECT=TRUE"))
 (def ^:private _conf_
   {:locale {:country "US" :lang "en"}
@@ -87,16 +86,16 @@
             (do (reset! moves (drop 1 @moves)) m))]
     (when c
       (->> {:value value :cell c}
-           (privateEvent<> ::loki/play-move)
-           encodeEvent
-           (.write ^WSClientConnect @con)))))
+           (nc/privateEvent<> ::loki/play-move)
+           nc/encodeEvent
+           (cl/write-ws-msg @con)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- concb [id con info moves res c m]
   (let [{:keys [type code body] :as msg}
-        (decodeEvent (.strit ^XData (:body m)))]
-    (log/debug "[JSON-STR]\n%s\n" (prettyEvent msg))
+        (nc/decodeEvent (.strit ^XData (:body m)))]
+    (log/debug "[JSON-STR]\n%s\n" (nc/prettyEvent msg))
     (swap! res conj code)
     (cond
       (= ::loki/playreq-ok code)
@@ -138,60 +137,60 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- wsconn<> "" [cb]
-  (cc/wsconnect<> "localhost" 9090 "/loki/tictactoe" cb))
+  (cl/wsconnect<> "localhost" 9090 "/loki/tictactoe" cb))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn- req-game "" [^WSClientConnect c user pwd]
+(defn- req-game "" [c user pwd]
   (->> {:type ::loki/private
         :code ::loki/playgame-req
         :body {:gameid "bd5f79bbeb414ed5bb442529dc27ed3c"
                :principal user
                :credential pwd}}
-       encodeEvent
-       (.write c )))
+       nc/encodeEvent
+       (cl/write-ws-msg c)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (deftest ^:tictactoe test-tictactoe
 
-  (is (do->true
-        (startViaConfig *tempfile-repo* _conf_)
-        (pause 1000)))
+  (is (c/do->true
+        (wc/startViaConfig i/*tempfile-repo* _conf_)
+        (c/pause 1000)))
 
   (testing "related to: win game"
     (is (let [h (wsconn<> (partial concb "1" con1 info1 moves1 res1))
-              ^WSClientConnect c (deref h 5000 nil)]
+              c (deref h 5000 nil)]
           (if (some? c)
-            (do->true (reset! con1 c)))))
+            (c/do->true (reset! con1 c)))))
 
     (is (let [h (wsconn<> (partial concb "2" con2 info2 moves2 res2))
-              ^WSClientConnect c (deref h 5000 nil)]
+              c (deref h 5000 nil)]
           (if (some? c)
-            (do->true (reset! con2 c)))))
+            (c/do->true (reset! con2 c)))))
 
     (is (let []
           (req-game @con1 "paul" "secret")
           (req-game @con2 "mary" "secret")
-          (pause 1500)
+          (c/pause 1500)
           (and (contains? @res1 ::loki/playreq-ok)
                (contains? @res1 ::loki/start)
                (contains? @res2 ::loki/playreq-ok)
                (contains? @res2 ::loki/start))))
 
     (is (let []
-          (.write ^WSClientConnect @con2
-                  (encodeEvent (privateEvent<> ::loki/started {})))
-          (.write ^WSClientConnect @con1
-                  (encodeEvent (privateEvent<> ::loki/started {})))
-          (pause 1500)
+          (cl/write-ws-msg @con2
+                  (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
+          (cl/write-ws-msg @con1
+                  (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
+          (c/pause 1500)
           (and (or (contains? @res1 ::loki/poke-move)
                    (contains? @res1 ::loki/poke-wait))
                (or (contains? @res2 ::loki/poke-move)
                    (contains? @res2 ::loki/poke-wait)))))
 
     (is (let []
-          (pause 2000)
+          (c/pause 2000)
           (and (or (contains? @res1 ::loki/game-won)
                (or (contains? @res2 ::loki/game-won)))))))
 
@@ -201,25 +200,25 @@
           (reset! res1 #{})
           (reset! moves2 m2data)
           (reset! moves1 m1data)
-          (.write ^WSClientConnect @con1
-                  (encodeEvent (privateEvent<> ::loki/replay {})))
-          (pause 1500)
+          (cl/write-ws-msg @con1
+                  (nc/encodeEvent (nc/privateEvent<> ::loki/replay {})))
+          (c/pause 1500)
           (and (contains? @res1 ::loki/restart)
                (contains? @res2 ::loki/restart))))
 
     (is (let []
-          (.write ^WSClientConnect @con2
-                  (encodeEvent (privateEvent<> ::loki/started {})))
-          (.write ^WSClientConnect @con1
-                  (encodeEvent (privateEvent<> ::loki/started {})))
-          (pause 1500)
+          (cl/write-ws-msg @con2
+                  (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
+          (cl/write-ws-msg @con1
+                  (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
+          (c/pause 1500)
           (and (or (contains? @res1 ::loki/poke-move)
                    (contains? @res1 ::loki/poke-wait))
                (or (contains? @res2 ::loki/poke-move)
                    (contains? @res2 ::loki/poke-wait)))))
 
     (is (let []
-          (pause 2000)
+          (c/pause 2000)
           (and (or (contains? @res1 ::loki/game-won)
                    (contains? @res2 ::loki/game-won))))))
 
@@ -229,25 +228,25 @@
           (reset! res1 #{})
           (reset! moves2 m2draw)
           (reset! moves1 m1draw)
-          (.write ^WSClientConnect @con1
-                  (encodeEvent (privateEvent<> ::loki/replay {})))
-          (pause 1500)
+          (cl/write-ws-msg @con1
+                  (nc/encodeEvent (nc/privateEvent<> ::loki/replay {})))
+          (c/pause 1500)
           (and (contains? @res1 ::loki/restart)
                (contains? @res2 ::loki/restart))))
 
     (is (let []
-          (.write ^WSClientConnect @con2
-                  (encodeEvent (privateEvent<> ::loki/started {})))
-          (.write ^WSClientConnect @con1
-                  (encodeEvent (privateEvent<> ::loki/started {})))
-          (pause 1500)
+          (cl/write-ws-msg @con2
+                  (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
+          (cl/write-ws-msg @con1
+                  (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
+          (c/pause 1500)
           (and (or (contains? @res1 ::loki/poke-move)
                    (contains? @res1 ::loki/poke-wait))
                (or (contains? @res2 ::loki/poke-move)
                    (contains? @res2 ::loki/poke-wait)))))
 
     (is (let []
-          (pause 2000)
+          (c/pause 2000)
           (and (or (contains? @res1 ::loki/game-tie)
                    (contains? @res2 ::loki/game-tie))))))
 
@@ -257,23 +256,23 @@
           (reset! res1 #{})
           (reset! moves2 m2draw)
           (reset! moves1 m1draw)
-          (.write ^WSClientConnect @con1
-                  (encodeEvent (privateEvent<> ::loki/replay {})))
-          (pause 1500)
+          (cl/write-ws-msg @con1
+                  (nc/encodeEvent (nc/privateEvent<> ::loki/replay {})))
+          (c/pause 1500)
           (and (contains? @res1 ::loki/restart)
                (contains? @res2 ::loki/restart))))
 
     (is (let []
           (swap! res2 conj ::loki/quit)
           (swap! res1 conj ::loki/quit)
-          (.write ^WSClientConnect @con2
-                  (encodeEvent (privateEvent<> ::loki/started {})))
-          (.write ^WSClientConnect @con1
-                  (encodeEvent (privateEvent<> ::loki/started {})))
-          (pause 1000)
-          (.write ^WSClientConnect @con2
-                  (encodeEvent (privateEvent<> ::loki/quit {})))
-          (pause 1500)
+          (cl/write-ws-msg @con2
+                  (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
+          (cl/write-ws-msg @con1
+                  (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
+          (c/pause 1000)
+          (cl/write-ws-msg @con2
+                  (nc/encodeEvent (nc/privateEvent<> ::loki/quit {})))
+          (c/pause 1500)
           (and (or (contains? @res1 ::loki/play-scrubbed)
                    (contains? @res2 ::loki/play-scrubbed))))))
 

@@ -17,15 +17,14 @@
 
   czlab.frigga.pong.core
 
-  (:require [czlab.loki.xpis :as loki :refer :all]
-            [czlab.basal.logging :as log])
-
-  (:use [czlab.loki.net.core]
-        [czlab.loki.util]
-        [czlab.basal.process]
-        [czlab.basal.format]
-        [czlab.basal.core]
-        [czlab.basal.str])
+  (:require [czlab.loki.net.core :as nc]
+            [czlab.loki.xpis :as loki]
+            [czlab.basal.log :as log]
+            [czlab.loki.util :as u]
+            [czlab.basal.core :as c]
+            [czlab.basal.str :as s]
+            [czlab.basal.format :as f]
+            [czlab.basal.process :as p])
 
   (:import [czlab.jasal Startable Initable Restartable]))
 
@@ -326,7 +325,7 @@
     ;;calc random angle 45 < t < 135 or 225 < t < 315
     (merge ball
            {:x x :y y}
-           (if (spos? (randSign))
+           (if (c/spos? (c/randSign))
              {:theta (+ r _45_)}
              {:theta (+ r _pi_ _45_)}))))
 
@@ -339,7 +338,7 @@
         {:keys [theta] :as b}
         (merge ball
                {:x x :y y}
-               (if (spos? (randSign))
+               (if (c/spos? (c/randSign))
                  {:theta (+ r _90_ _45_)}
                  {:theta (+ r _270_ _45_)}))]
     (if (> theta _2pi_)
@@ -374,10 +373,10 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- getFrames "" [sessions]
-  (->> (preduce<vec>
+  (->> (c/preduce<vec>
          #(let [{:keys [framespersec]}
                 (deref %2)]
-            (if (spos? framespersec)
+            (if (c/spos? framespersec)
               (conj! %1 framespersec) %1)) sessions)
        (apply min 60)))
 
@@ -427,7 +426,7 @@
                             {:pnum winner})}]
     (log/debug "game over: winner is %s" src)
     (.stop ^Startable me)
-    (bcast! (:room @me) ::loki/game-won src)))
+    (nc/bcast! (:room @me) ::loki/game-won src)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -440,12 +439,11 @@
         kw (:color (if (= pnum 1) p1 p2))
         st (:session (if (= pnum 1) p2 p1))
         pv (:pv (kw body))
-        sign (numSign pv)]
-    (setf! me
-           kw
-           (assoc (kw @me)
-                  :theta sign))
-    (syncArena! room body st)))
+        sign (c/numSign pv)]
+    (c/setf! me
+             kw
+             (assoc (kw @me) :theta sign))
+    (nc/syncArena! room body st)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -455,8 +453,7 @@
     ;;someone has won, get out
     (if (or (>= b numpts)
             (>= a numpts))
-      (trap! Exception "loop breaker")
-      (try! (Thread/sleep tick)))))
+      (c/trap! Exception "loop breaker") (c/pause tick))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -467,9 +464,9 @@
         b (cfgBall world ball)
         c2 (:color (getPlayer me 2))
         c1 (:color (getPlayer me 1))]
-    (copy* me {c2 p2 c1 p1 :ball b})
+    (c/copy* me {c2 p2 c1 p1 :ball b})
     (->> {:score score :ball b c2 p2 c1 p1}
-         (bcast! room ::loki/start-round ))))
+         (nc/bcast! room ::loki/start-round ))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Update UI with states of local entities
@@ -478,7 +475,7 @@
         c1 (:color (getPlayer me 1))
         src (select-keys @me [c2 c1 :ball])]
     (log/debug "sync new ball values %s" (:ball src))
-    (syncArena! (:room @me) src)))
+    (nc/syncArena! (:room @me) src)))
 
 (declare syncTick)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -487,20 +484,20 @@
   (if-not (:resetting-pt? @me)
     (let [{:keys [lastTick lastSync syncMillis]}
           @me
-          now (now<>)]
+          now (c/now<>)]
       ;; --- update the game with the difference
       ;;in ms since the
       ;; --- last tick
       (let [diff (- now lastTick)
             lastSync2 (+ lastSync diff)]
         (syncTick me (/ diff 1000))
-        (copy* me
-               {:lastTick now
-                :lastSync lastSync2})
+        (c/copy* me
+                 {:lastTick now
+                  :lastSync lastSync2})
         ;; --- check if time to send a ball update
         (when (> lastSync syncMillis)
           (syncClients me)
-          (setf! me :lastSync 0))))))
+          (c/setf! me :lastSync 0))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;A point has been won. Update the score, and maybe trigger game-over
@@ -509,14 +506,14 @@
         p (getPlayer me winner)
         c (:color p)
         sx (inc (get score c))]
-    (setf! me :resetting-pt? true)
-    (setf! me
-           :score
-           (assoc (:score @me) c sx))
+    (c/setf! me :resetting-pt? true)
+    (c/setf! me
+             :score
+             (assoc (:score @me) c sx))
     (log/debug "updated score by 1, new score: %s" (:score @me))
     (if (>= sx numpts)
       (gameOver me winner)
-      (start-round me {}))))
+      (loki/start-round me {}))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Move local entities per game loop
@@ -526,49 +523,49 @@
         c1 (:color (getPlayer me 1))
         pad2 (syncPad world (c2 @me) dt)
         pad1 (syncPad world (c1 @me) dt)
-        _ (copy* me {c2 pad2 c1 pad1})
-        ball (moveObject! (:ball @me)
-                          dt
-                          (:opengl? world))
+        _ (c/copy* me {c2 pad2 c1 pad1})
+        ball (u/moveObject! (:ball @me)
+                            dt
+                            (:opengl? world))
         win (winner?? world pad1 pad2 ball)
         ball
-        (if-not (spos? win)
+        (if-not (c/spos? win)
           (hitPad?? world pad1 pad2 ball) ball)]
-    (if (spos? win)
+    (if (c/spos? win)
       (updatePoint me win)
-      (setf! me :ball ball))))
+      (c/setf! me :ball ball))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- runGameLoop "" [me cmd]
-  (copy* me
-         {:lastTick (now<>)
-          :lastSync 0
-          :resetting-pt? false })
+  (c/copy* me
+           {:lastTick (c/now<>)
+            :lastSync 0
+            :resetting-pt? false })
   (if (:new? cmd)
-    (async! #(try!
-               (while true
-                 (try! (updateArena me))
-                 (postUpdateArena me)))
-            {:daemon true})))
+    (p/async! #(c/try!
+                 (while true
+                   (c/try! (updateArena me))
+                   (postUpdateArena me)))
+              {:daemon true})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(decl-volatile Pong
-  GameImpl
+(c/decl-volatile Pong
+  loki/GameImpl
   (get-player-gist [me id]
     (some #(let [s (:session %)]
-             (if (= id (id?? (:player @s)))
+             (if (= id (c/id?? (:player @s)))
                (dissoc % :session))) (drop 1 (:actors @me))))
   (start-round [me cmd]
     (doto me pokeAndStartUI (runGameLoop cmd)))
   (end-round [_ ])
   (on-game-event [me evt]
-    (log/debug "game engine got an update %s" (prettyEvent evt))
-    (if (isMove? evt)
+    (log/debug "game engine got an update %s" (nc/prettyEvent evt))
+    (if (nc/isMove? evt)
       (let [{:keys [body context]} evt]
         (log/debug "rec'ved move: %s%s%s"
-                   body " from session " (id?? context))
+                   body " from session " (c/id?? context))
         (enqueue me evt))))
   Initable
   (init [me _]
@@ -590,8 +587,8 @@
     (log/debug "pong: start called()")
     (->> {(:color (getPlayer me 2)) 0
           (:color (getPlayer me 1)) 0}
-         (setf! me :score ))
-    (start-round me {:new? true})))
+         (c/setf! me :score ))
+    (loki/start-round me {:new? true})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -600,18 +597,18 @@
 
   (let [fps (getFrames sessions)
         w (ctorWorld 320 480)]
-    (mutable<> Pong
-               {:paddle (ctorObj w 50 12 _paddle-speed_)
-                :ball (ctorObj w 15 15 _ball-speed_)
-                :sessions sessions
-                :room room
-                :actors (object-array 3)
-                :framespersec fps
-                :tick (/ 1000 fps)
-                :syncMillis 2000
-                :numpts 5
-                :world w
-                :score {}} )))
+    (c/mutable<> Pong
+                 {:paddle (ctorObj w 50 12 _paddle-speed_)
+                  :ball (ctorObj w 15 15 _ball-speed_)
+                  :sessions sessions
+                  :room room
+                  :actors (object-array 3)
+                  :framespersec fps
+                  :tick (/ 1000 fps)
+                  :syncMillis 2000
+                  :numpts 5
+                  :world w
+                  :score {}} )))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;EOF

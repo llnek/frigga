@@ -17,14 +17,13 @@
 
   czlab.frigga.tttoe.core
 
-  (:require [czlab.loki.xpis :as loki :refer :all]
-            [czlab.basal.logging :as log]
-            [clojure.string :as cs])
-
-  (:use [czlab.loki.net.core]
-        [czlab.basal.format]
-        [czlab.basal.core]
-        [czlab.basal.str])
+  (:require [czlab.loki.net.core :as nc]
+            [czlab.basal.format :as f]
+            [clojure.string :as cs]
+            [czlab.basal.core :as c]
+            [czlab.basal.str :as s]
+            [czlab.basal.log :as log]
+            [czlab.loki.xpis :as loki])
 
   (:import [czlab.jasal Startable Initable Restartable]))
 
@@ -39,7 +38,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- genGoalSpace  "" [bsize]
-  (let [arr #(preduce<vec>
+  (let [arr #(c/preduce<vec>
                 (fn [a _]
                   (conj! a (long-array bsize 0))) (range %))
         rows (arr bsize)
@@ -107,8 +106,8 @@
         cpss (:session cp)
         opss (:session op)]
     (doto room
-      (pokeWait! (assoc src :pnum (:number @opss)) opss)
-      (pokeMove! (assoc src :pnum (:number @cpss)) cpss))))
+      (nc/pokeWait! (assoc src :pnum (:number @opss)) opss)
+      (nc/pokeMove! (assoc src :pnum (:number @cpss)) cpss))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -145,9 +144,9 @@
 (defn- repoke "" [me]
   (let [pss (:session (gcur me))
         {:keys [room grid]} @me]
-    (pokeMove! room
-               {:pnum (:number @pss)
-                :grid (vec grid)} pss)))
+    (nc/pokeMove! room
+                  {:pnum (:number @pss)
+                   :grid (vec grid)} pss)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -160,10 +159,10 @@
 (defn- drawGame [me cmd]
   (log/debug "game to end, no winner!!!")
   (onStopReset me)
-  (bcast! (:room @me)
-          ::loki/game-tie
-          (fmtStatus me
-                     {:cmd cmd :combo []} 0)))
+  (nc/bcast! (:room @me)
+             ::loki/game-tie
+             (fmtStatus me
+                           {:cmd cmd :combo []} 0)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -172,9 +171,9 @@
         pnum (:number @pss)]
     (log/debug "game to end, winner found! combo = %s" combo)
     (onStopReset me)
-    (bcast! (:room @me)
-            ::loki/game-won
-            (fmtStatus me {:cmd cmd :combo combo} pnum))))
+    (nc/bcast! (:room @me)
+               ::loki/game-won
+               (fmtStatus me {:cmd cmd :combo combo} pnum))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -204,27 +203,26 @@
         (checkWin me cmd))
       (repoke me))))
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(decl-mutable TicTacToe
-  GameImpl
+(c/decl-mutable TicTacToe
+  loki/GameImpl
   (get-player-gist [me id]
     (some #(let [s (:session %)]
-             (if (= id (id?? (:player @s)))
+             (if (= id (c/id?? (:player @s)))
                (dissoc % :session)))
           (->> (:actors @me) (drop 1))))
   (start-round [_ _])
   (end-round [_])
   (on-game-event [me evt]
     (let [{:keys [context body]} evt]
-      (log/debug "game got an update %s" (prettyEvent evt))
+      (log/debug "game got an update %s" (nc/prettyEvent evt))
       (cond
-        (isMove? evt)
-        (do->nil
-          (log/debug "rec'ved %s from [%s]" body (id?? context))
+        (nc/isMove? evt)
+        (c/do->nil
+          (log/debug "rec'ved %s from [%s]" body (c/id?? context))
           (enqueue me body))
-        (isQuit? evt)
+        (nc/isQuit? evt)
         ::loki/tear-down)))
 
   Initable
@@ -251,22 +249,23 @@
                   (range sz)))
       (log/debug "tictactoe: start called()")
       (log/debug "tictactoe: grid = %s" (vec grid))
-      (->> (if (> (randSign) 0) 1 2)
+      (->> (if (> (c/randSign) 0) 1 2)
            (aget #^"[Ljava.lang.Object;" actors)
            (aset #^"[Ljava.lang.Object;" actors 0))
       (dequeue me nil))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn tictactoe
   "" [room sessions]
 
   (let [grid (long-array (* _bsize_ _bsize_) _cvz_)]
-    (mutable<> TicTacToe
-               {:goalspace (genGoalSpace _bsize_)
-                :sessions sessions
-                :grid grid
-                :room room
-                :actors (object-array 3)})))
+    (c/mutable<> TicTacToe
+                 {:goalspace (genGoalSpace _bsize_)
+                  :sessions sessions
+                  :grid grid
+                  :room room
+                  :actors (object-array 3)})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;EOF
