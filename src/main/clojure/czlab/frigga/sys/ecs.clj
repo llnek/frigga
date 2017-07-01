@@ -41,203 +41,94 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(c/decl-object EngineObject
+(c/decl-atomic EngineObject
   Engine
+  (getNodes [me] (vals (:enodes @me)))
+  (getNodes [me comType]
+            (.getNodes me [comType]))
   (getNodes [me comTypes]
-    (let [pmin Integer/MAX_VALUE
-          missed false
-          pm nil]
-      ;;find shortest cache, doing an intersection
-  F__LOOP(it,cs) {
-    auto &cid= *it;
-    auto c= _types->getCache(cid);
-    if (E_NIL(c)) {
-      //CCLOG("cache missed when looking for intersection on %s", cid.c_str());
-      missed=true;
-      break;
-    }
-    if (c->size() < pmin) {
-      pmin= c->size();
-      pm=c;
-    }
-    ccs.push_back(c);
-  }
-
-  if (missed) {
-  return; }
-
-  //CCLOG("intesection on %d caches", (int)ccs.size());
-
-  if (ccs.size() > 0) {
-    //use the shortest cache as the baseline
-    F__POOP(it,pm) {
-      auto eid= it->first;
-      auto sum=0;
-
-      // look for intersection
-      F__LOOP(it2,ccs) {
-        auto c= *it2;
-        if (c==pm) { ++sum; continue;}
-        auto it3= c->find(eid);
-        if (it3 != c->end()) {
-          ++sum;
-        }
-      }
-
-      // if found in all caches...
-      if (sum == ccs.size()) {
-        // all matched
-        auto it4= _ents.find(eid);
-        if (it4 != _ents.end()) {
-          rc.push_back(it4->second);
-        }
-      }
-    }
-  }
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-const s_vec<Node*> Engine::getNodes(const s_vec<COMType> &cs) {
-  s_vec<Node*> rc;
-  getNodes(cs, rc);
-  return rc;
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-void Engine::getNodes(const COMType &c, s_vec<Node*> &rc) {
-  auto cc= _types->getCache(c);
-  if (cc) F__POOP(it,cc) {
-    auto z= it->first;
-    auto it2= _ents.find(z);
-    if (it2 != _ents.end()) {
-      rc.push_back(it2->second);
-    }
-  }
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-const s_vec<Node*> Engine::getNodes(const COMType &c) {
-  s_vec<Node*> rc;
-  getNodes(c,rc);
-  return rc;
-}
-
-
-//////////////////////////////////////////////////////////////////////////////
-//
-void Engine::getNodes(s_vec<Node*> &rc) {
-  F__LOOP(it, _ents) {
-    rc.push_back(it->second);
-  }
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-const s_vec<Node*> Engine::getNodes() {
-  s_vec<Node*> rc;
-  getNodes(rc);
-  return rc;
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-NodeId Engine::generateEid() {
-  auto rc= ++_lastId;
-  if (rc < INT_MAX) {} else {
-    throw "too many entities";
-  }
-  return rc;
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-Node* Engine::reifyNode(const sstr &n, bool take) {
-  auto eid= this->generateEid();
-  auto e= mc_new3(Node, this, n, eid);
-  _ents.insert(S__PAIR(NodeId,Node*,eid,e));
-  if (take) {e->take();}
-  return e;
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-void Engine::purgeNode(not_null<Node*> e) {
-  // cannot purge twice!
-  assert(e->isOk());
-  e->die();
-  _garbo.push_back(e);
-
-  auto it= _ents.find(e->getEid());
-  if (it != _ents.end()) {
-    _ents.erase(it);
-  }
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-void Engine::purgeNodes() {
-  F__LOOP(it, _ents) {
-    delete it->second;
-  }
-  _ents.clear();
-  doHouseKeeping();
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-void Engine::regoSystem(not_null<System*> s) {
-  _systemList.add(s);
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-void Engine::purgeSystem(not_null<System*> s ) {
-  _systemList.purge(s);
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-void Engine::purgeSystems() {
-  _systemList.clear();
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-void Engine::update(float time) {
-  _updating = true;
-  for (auto s= _systemList._head; N_NIL(s); s= s->_next) {
-    if (s->isActive()) {
-      if (! s->update(time)) { break; }
-    }
-  }
-  doHouseKeeping();
-  _updating = false;
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-void Engine::ignite() {
-  initEntities();
-  initSystems();
-  for (auto s= _systemList._head; N_NIL(s); s=s->_next) {
-    s->preamble();
-  }
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//
-void Engine::doHouseKeeping() {
-  F__LOOP(it, _garbo) {
-    delete *it;
-  }
-  _garbo.clear();
-}
-
-
-
+    ;;find shortest cache, doing an intersection
+    (let
+      [{:keys [ccache enodes]} @me
+       [ccs pmin missed]
+       (loop [[cid & more] comTypes
+              pmin nil ccs [] missed 0]
+         (let [c (get ccache cid)]
+           (if (nil? cid)
+             [ccs pmin missed]
+             (recur more
+                    (cond
+                      (nil? pmin) c
+                      (nil? c) pmin
+                      (< (.size c) (.size pmin)) c
+                      :else pmin)
+                    (if c (conj ccs c) ccs)
+                    (if c missed (inc missed))))))]
+      ;;use the shortest cache as the baseline
+      (when-not (or (pos? missed)
+                    (empty? ccs))
+        ;; look for intersection
+        (c/preduce<vec>
+          (fn [acc [eid _]]
+            (let [sum
+                  (loop [[c & more] ccs sum 0]
+                    (if (nil? c)
+                      sum
+                      (recur more
+                             (if (c/in? c eid)
+                               (inc sum) sum))))]
+              ;; if found in all caches...
+              (if (= sum (count ccs))
+                (conj! acc (get enodes eid))
+                acc)))
+          pmin))))
+  (reifyNode [me n take?]
+    (let [eid (keyword (c/seqint2))
+          e (c/object<> me n eid)]
+      (swap! me
+             update-in [enodes] assoc eid e)
+      (if take? (p-take! e))
+      e))
+  (purgeNode [me e]
+    ;; cannot purge twice!
+    (assert (p-ok? e))
+    (p-die! e)
+    (swap! me
+           update-in [garbo] conj e)
+    (swap! me
+           update-in [enodes] dissoc (:id e)))
+  (purgeNodes [me]
+    (doseq [[_ e] (:enodes @me)] (p-finz e))
+    (swap! me assoc enodes {})
+    (doHouseKeeping))
+  (regoSystem [me s]
+    (swap! me
+           update-in [systems] conj s))
+  (purgeSystem [me s]
+    (swap! me
+           update-in [systems] disj s))
+  (purgeSystems [me]
+    (swap! me
+           assoc :systems #{}))
+  (update [me dt]
+    (swap! me
+           assoc :updating? true)
+    (loop [[s & more] (:systems @me)]
+      (if (and (:active? s)
+               (not (update s dt)))
+        nil
+        (recur more)))
+    (doHouseKeeping)
+    (swap! me assoc :updating? false))
+  (ignite [me]
+    (initEntities)
+    (initSystems)
+    (doseq [s (:systems @me)]
+      (preamble s)))
+  (doHouseKeeping [me]
+    (doseq [e (:garbo @me)]
+      (finz e))
+    (swap! me assoc :garbo #{})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
