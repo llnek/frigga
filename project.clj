@@ -1,6 +1,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defproject io.czlab/frigga "1.0.0"
+(defproject io.czlab/frigga "1.1.0"
 
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
@@ -14,7 +14,7 @@
    [io.czlab/wabbit-cons "1.0.0"]
    [io.czlab/loki "1.0.0"]
    [io.czlab/wabbit "1.0.0"]
-   [io.czlab/wabbit-plugs "1.0.0"]]
+   [io.czlab/wabbit-plugs "1.0.1"]]
 
   :plugins [[wabbit/lein-template "1.0.0"]
             [cider/cider-nrepl "0.14.0"]

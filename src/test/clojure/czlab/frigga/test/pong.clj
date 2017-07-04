@@ -139,7 +139,8 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- wsconn<> "" [cb]
-  (cc/wsconnect<> "localhost" 9090 "/loki/pong" cb))
+  (-> (c/object<> czlab.nettio.client.NettyClientModule)
+      (cc/wsconnect<>  "localhost" 9090 "/loki/pong" cb)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;

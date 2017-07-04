@@ -8,7 +8,7 @@ Server side game platform.
 
 Add the following dependency to your `project.clj` file:
 
-    [io.czlab/frigga "1.0.0"]
+    [io.czlab/frigga "1.1.0"]
 
 ## Documentation
 
