@@ -12,6 +12,7 @@
   czlab.frigga.test.pong
 
   (:require [czlab.nettio.client :as cl]
+            [czlab.convoy.core :as cc]
             [czlab.loki.net.core :as nc]
             [czlab.basal.log :as log]
             [czlab.basal.core :as c]
@@ -83,7 +84,7 @@
       (->> {:value value :cell c}
            (nc/privateEvent<> ::loki/play-move)
            nc/encodeEvent
-           (cl/write-ws-msg @con)))))
+           (cc/write-ws-msg @con)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -138,7 +139,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- wsconn<> "" [cb]
-  (cl/wsconnect<> "localhost" 9090 "/loki/pong" cb))
+  (cc/wsconnect<> "localhost" 9090 "/loki/pong" cb))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -149,7 +150,7 @@
                :principal user
                :credential pwd}}
        nc/encodeEvent
-       (cl/write-ws-msg c)))
+       (cc/write-ws-msg c)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -180,9 +181,9 @@
                (contains? @res2 ::loki/start))))
 
     (is (let []
-          (cl/write-ws-msg @con2
+          (cc/write-ws-msg @con2
                   (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
-          (cl/write-ws-msg @con1
+          (cc/write-ws-msg @con1
                   (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
           (c/pause 15000)
           true)))

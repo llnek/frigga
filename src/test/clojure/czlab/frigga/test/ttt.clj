@@ -12,6 +12,7 @@
   czlab.frigga.test.ttt
 
   (:require [czlab.nettio.client :as cl]
+            [czlab.convoy.core :as cc]
             [czlab.loki.net.core :as nc]
             [czlab.loki.xpis :as loki]
             [czlab.basal.log :as log]
@@ -88,7 +89,7 @@
       (->> {:value value :cell c}
            (nc/privateEvent<> ::loki/play-move)
            nc/encodeEvent
-           (cl/write-ws-msg @con)))))
+           (cc/write-ws-msg @con)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -137,7 +138,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn- wsconn<> "" [cb]
-  (cl/wsconnect<> "localhost" 9090 "/loki/tictactoe" cb))
+  (cc/wsconnect<> "localhost" 9090 "/loki/tictactoe" cb))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -148,7 +149,7 @@
                :principal user
                :credential pwd}}
        nc/encodeEvent
-       (cl/write-ws-msg c)))
+       (cc/write-ws-msg c)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -179,9 +180,9 @@
                (contains? @res2 ::loki/start))))
 
     (is (let []
-          (cl/write-ws-msg @con2
+          (cc/write-ws-msg @con2
                   (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
-          (cl/write-ws-msg @con1
+          (cc/write-ws-msg @con1
                   (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
           (c/pause 1500)
           (and (or (contains? @res1 ::loki/poke-move)
@@ -200,16 +201,16 @@
           (reset! res1 #{})
           (reset! moves2 m2data)
           (reset! moves1 m1data)
-          (cl/write-ws-msg @con1
+          (cc/write-ws-msg @con1
                   (nc/encodeEvent (nc/privateEvent<> ::loki/replay {})))
           (c/pause 1500)
           (and (contains? @res1 ::loki/restart)
                (contains? @res2 ::loki/restart))))
 
     (is (let []
-          (cl/write-ws-msg @con2
+          (cc/write-ws-msg @con2
                   (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
-          (cl/write-ws-msg @con1
+          (cc/write-ws-msg @con1
                   (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
           (c/pause 1500)
           (and (or (contains? @res1 ::loki/poke-move)
@@ -228,16 +229,16 @@
           (reset! res1 #{})
           (reset! moves2 m2draw)
           (reset! moves1 m1draw)
-          (cl/write-ws-msg @con1
+          (cc/write-ws-msg @con1
                   (nc/encodeEvent (nc/privateEvent<> ::loki/replay {})))
           (c/pause 1500)
           (and (contains? @res1 ::loki/restart)
                (contains? @res2 ::loki/restart))))
 
     (is (let []
-          (cl/write-ws-msg @con2
+          (cc/write-ws-msg @con2
                   (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
-          (cl/write-ws-msg @con1
+          (cc/write-ws-msg @con1
                   (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
           (c/pause 1500)
           (and (or (contains? @res1 ::loki/poke-move)
@@ -256,7 +257,7 @@
           (reset! res1 #{})
           (reset! moves2 m2draw)
           (reset! moves1 m1draw)
-          (cl/write-ws-msg @con1
+          (cc/write-ws-msg @con1
                   (nc/encodeEvent (nc/privateEvent<> ::loki/replay {})))
           (c/pause 1500)
           (and (contains? @res1 ::loki/restart)
@@ -265,12 +266,12 @@
     (is (let []
           (swap! res2 conj ::loki/quit)
           (swap! res1 conj ::loki/quit)
-          (cl/write-ws-msg @con2
+          (cc/write-ws-msg @con2
                   (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
-          (cl/write-ws-msg @con1
+          (cc/write-ws-msg @con1
                   (nc/encodeEvent (nc/privateEvent<> ::loki/started {})))
           (c/pause 1000)
-          (cl/write-ws-msg @con2
+          (cc/write-ws-msg @con2
                   (nc/encodeEvent (nc/privateEvent<> ::loki/quit {})))
           (c/pause 1500)
           (and (or (contains? @res1 ::loki/play-scrubbed)

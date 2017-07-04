@@ -44,6 +44,7 @@
                    "run" "-m" "czlab.wabbit.core"]}
 
   :test-selectors {:ttt :tictactoe
+                   :ecs :ecs
                    :pong :pong}
 
   ;;:java-source-paths ["src/main/java"]
