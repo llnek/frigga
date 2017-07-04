@@ -20,48 +20,96 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;(set! *warn-on-reflection* true)
 (defmacro ^:private genEID "" [] `(keyword (c/seqint2)))
+(defn- concatv [x y] (into [] (concat x y)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;pre-populate a bunch of objects in the pool
-(defn presetPoolNodes "" [pool func cnt]
-  (swap! pool merge {:batch cnt :ctor func})
-  (->> (c/preduce<vec>
-         #(let [rc (func) _ %2]
-            (if rc (conj! %1 rc) %1)) (range cnt))
-       (swap! pool update-in [:nodes] concat))
-  pool)
+(defn- presetPool "" [pool]
+  (let [{:keys [ctor batch]} @pool]
+    (->> (c/preduce<vec>
+           #(let [rc (ctor) _ %2]
+              (if rc (conj! %1 rc) %1)) (range batch))
+         (swap! pool update-in [:nodes] concatv))
+    pool))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- p-yield! "" [pobj] (c/setf! pobj :active? false) pobj)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn- p-take! "" [pobj] (c/setf! pobj :active? true) pobj)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn objPool<> "" [func cnt]
+  (presetPool (atom {:batch (or cnt 10)
+                     :ctor func
+                     :nodes []})))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn enode<> ""
+  ([ecsdb name] (enode<> ecsdb name nil))
+  ([ecsdb name take?]
+   (let [eid (genEID)
+         e (atom {:active? false
+                  :stale? false
+                  :id eid
+                  :name name})]
+     (swap! ecsdb update-in [:enodes] assoc eid e)
+     (if take? (p-take! e))
+     e)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+(defn ecsdb<> ""
+  ([] (ecsdb<> nil))
+  ([cfg]
+   (atom {:config cfg
+          :systems #{}
+          :enodes {}
+          :ccache {}
+          :sorted-systems []})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;find an object by applying this filter
 (defn selectFromPool [pool selector]
-  (some #(if (and (:active? %1)
-                  (selector %1)) %1) (:nodes @pool)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;get a free object from the pool and set it's status to true
-(defn takeFromPool ""
-  ([pool] (takeFromPool pool nil))
-  ([pool create?]
-   (do-with [rc (getFromPool pool create?)]
-     (if rc (p-take! rc)))))
+  (some #(if (selector %1) %1) (:nodes @pool)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;get a free object from the pool.  More like a peek
 (defn getFromPool ""
   ([pool] (getFromPool pool nil))
   ([pool create?]
-   (let [e (some #(if-not (:active? %1) %1) (:nodes @pool))
-        {:keys [ctor batch]} @pool]
+   (let [{:keys [nodes ctor batch]} @pool
+         e (some #(if-not (:active? %1) %1) nodes)]
     (if (some? e)
       e
-      (when (and create? ctor)
-        (presetPoolNodes pool ctor batch)
-        (getFromPool me))))))
+      (if create?
+        (-> (presetPool pool) getFromPool ))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;get a free object from the pool and set it's status to true
+(defn takeFromPool ""
+  ([pool] (takeFromPool pool nil))
+  ([pool create?]
+   (c/do-with [rc (getFromPool pool create?)]
+     (if rc (p-take! rc)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn checkinPool [pool c]
-  (if c (swap! pool update-in [:nodes] conj c)))
+(defn bindComponentToNode [node co]
+  (let [{:keys [ecs]} @node
+        {:keys [ccache]} @ecs
+        eid (:id node)
+        z (:typeId co)
+        h (get @ccache z)]
+    ;;a node cannot have many components of the same type
+    (assert (nil? (get h eid)))
+    (c/setf! co :node node)
+    (swap! ccache update-in [z] assoc eid co)
+    node))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -70,12 +118,12 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn getUsed "" [pool]
+(defn getUsedFromPool "" [pool]
   (filterv #(:active? %1) (:nodes @pool)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;get the count of active objects
-(defn countUsed "" [pool]
+(defn countUsedInPool "" [pool]
   (reduce
     #(if (:active? %2) (inc %1) %1) 0 (:nodes @pool)))
 
@@ -86,7 +134,7 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn someInPool? [me func]
+(defn someInPool? [pool func]
   (some? (some #(if (func %1) %1) (:nodes @pool))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -103,21 +151,22 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn getEnodes "" [ecsdb & comids]
+(defn getNodesFromECS "" [ecsdb & comids]
   (let
     [{:keys [ccache enodes]} @ecsdb
+     cc @ccache
      [ccs pmin missed]
      (loop [[cid & more] comids
             pmin nil ccs [] missed 0]
-       (let [c (get ccache cid)]
+       (let [c (get cc cid)]
          (if (nil? cid)
            [ccs pmin missed]
            (recur more
                   (cond
                     (nil? pmin) c
                     (nil? c) pmin
-                    (< (.size c)
-                       (.size pmin)) c
+                    (< (count c)
+                       (count pmin)) c
                     :else pmin)
                   (if c (conj ccs c) ccs)
                   (if c missed (inc missed))))))]
@@ -142,21 +191,8 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-(defn newEnode ""
-  ([ecsdb name] (newEnode ecsdb name nil))
-  ([ecsdb name take?]
-   (let [eid (genEID)]
-     (do-with [e (c/object<> ENodeObj
-                              {:name name :id eid})]
-        (swap! ecsdb update-in [:enodes] assoc eid e)
-        (if take? (p-take! e))))))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-(defn getComCache "" [ecsdb] (:ccache @ecsdb))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
 (defn getConfig "" [ecsdb] (:config @ecsdb))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn removeSystem "" [ecsdb s]
@@ -168,6 +204,7 @@
 ;;
 (defn removeSystems "" [ecsdb]
   (swap! ecsdb merge {:systems #{} :sorted-systems []}))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 (defn removeEnode "" [ecsdb node]
